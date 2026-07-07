@@ -241,10 +241,13 @@ async function showOCRResultPanel(text, analyzed) {
 
   const panel = document.createElement('div');
   panel.className = 'mrky-ocr-panel mrky-tooltip mrky-tooltip-visible';
+  panel.dataset.mrkyProcessed = 'true'; // Force light-theme CSS overrides for text colors
 
   let coloredHTML = '';
   for (const item of analyzed) {
-    const classes = `mrky-word ${item.posInfo.class}`;
+    const stopClass = item.isStop ? ' mrky-stop' : '';
+    const knownClass = item.isKnown ? ' mrky-known' : '';
+    const classes = `mrky-word ${item.posInfo.class}${stopClass}${knownClass}`;
     coloredHTML += `${item.pre}<span class="${classes}" style="color:${item.posInfo.color}">${item.word}</span>${item.post}`;
   }
 
