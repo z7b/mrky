@@ -59,8 +59,8 @@
       <div class="mrky-tooltip-word" style="direction: ltr; text-align: left; font-size: 17px; margin-bottom: 15px; line-height: 1.5; max-height: 150px; overflow-y: auto;">
         ${r||e}
       </div>
-      <div class="mrky-tooltip-translation mrky-ocr-result-translation">
-        <span class="mrky-tooltip-loading">\u062C\u0627\u0631\u064A \u0627\u0644\u062A\u0631\u062C\u0645\u0629...</span>
+      <div class="mrky-tooltip-translation mrky-ocr-result-translation" style="color: #4A5568; margin-bottom: 15px; font-size: 16px; font-weight: 500;">
+        <span class="mrky-tooltip-loading" style="color: #718096; font-style: italic;">\u062C\u0627\u0631\u064A \u0627\u0644\u062A\u0631\u062C\u0645\u0629...</span>
       </div>
       <div class="mrky-tooltip-actions">
         <button class="mrky-btn-add" disabled>\u23F3 \u062C\u0627\u0631\u064A \u0627\u0644\u062A\u0631\u062C\u0645\u0629...</button>
