@@ -249,12 +249,16 @@ async function showOCRResultPanel(text, analyzed) {
   }
 
   panel.innerHTML = `
-    <div class="mrky-tooltip-inner" style="min-width: 250px; text-align: center;">
+    <div class="mrky-tooltip-inner" style="min-width: 300px; max-width: 450px;">
       <div class="mrky-tooltip-header">
-        <span class="mrky-tooltip-pos" style="background: #EF4444; color: #fff;">OCR</span>
-        <span class="mrky-tooltip-word" style="font-size: 16px;">${coloredHTML || text}</span>
-        <button class="mrky-btn-speak mrky-ocr-speak" title="انطق النص">🔊</button>
-        <button class="mrky-ocr-close" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;padding:0 5px;margin-right:auto;font-size:16px;">✕</button>
+        <span class="mrky-tooltip-pos" style="background: var(--mrky-red, #EF4444); color: #fff;">📷 OCR</span>
+        <div style="margin-left: auto; display: flex; gap: 8px; align-items: center;">
+          <button class="mrky-btn-speak mrky-ocr-speak" title="انطق النص" style="margin: 0;">🔊</button>
+          <button class="mrky-ocr-close" style="background:transparent; border:none; color:#9ca3af; cursor:pointer; font-size:16px; padding: 0 4px;">✕</button>
+        </div>
+      </div>
+      <div class="mrky-tooltip-word" style="direction: ltr; text-align: left; font-size: 17px; margin-bottom: 15px; line-height: 1.5; max-height: 150px; overflow-y: auto;">
+        ${coloredHTML || text}
       </div>
       <div class="mrky-tooltip-translation mrky-ocr-result-translation">
         <span class="mrky-tooltip-loading">جاري الترجمة...</span>
