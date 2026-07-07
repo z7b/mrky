@@ -499,11 +499,45 @@ body {
   text-align: right;
 }
 
+.word-eng-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  direction: ltr;
+}
+
+.mrky-btn-speak-popup {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s ease;
+  padding: 0;
+  outline: none;
+}
+
+.mrky-btn-speak-popup:hover {
+  background: rgba(255, 255, 255, 0.15);
+  transform: scale(1.1);
+}
+
+.mrky-btn-speak-popup.playing {
+  background: #10B981;
+  border-color: #10B981;
+  animation: pulse 1s infinite;
+}
+
 .word-eng {
   font-size: 14px;
   font-weight: 700;
   color: var(--mrky-text);
-  direction: ltr;
 }
 
 .word-pos {

@@ -3,7 +3,7 @@
  * Manages stats rendering, showing the recent word list, and actions (Local Player & Review).
  */
 import { getAllCards, getDueCards, getKnownWordCount } from '../shared/db.js';
-
+import { playPronunciation } from '../shared/audio.js';
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM Elements
   const statCardsEl = document.getElementById('stat-cards-count');
@@ -48,6 +48,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch (error) {
     console.error('[Mrky Popup] Database error:', error);
   }
+
+  // Audio Playback Event Delegation
+  wordsListEl.addEventListener('click', (e) => {
+    const btn = e.target.closest('.mrky-btn-speak-popup');
+    if (btn) {
+      const word = btn.dataset.word;
+      if (word) {
+        btn.classList.add('playing');
+        playPronunciation(word, 'en-US').finally(() => {
+          btn.classList.remove('playing');
+        });
+      }
+    }
+  });
 
   // Start Review Session button (due cards only)
   btnStartReview.addEventListener('click', () => {
@@ -164,7 +178,10 @@ function renderRecentWords(cards) {
 
     item.innerHTML = `
       <div class="word-meta">
-        <span class="word-eng">${card.word}</span>
+        <div class="word-eng-wrapper">
+          <button class="mrky-btn-speak-popup" title="استمع للكلمة" data-word="${card.word}">🔊</button>
+          <span class="word-eng">${card.word}</span>
+        </div>
         <span class="word-pos" style="background:${color}; color:${textColor}">${card.pos}</span>
       </div>
       <span class="word-arb">${card.translation}</span>
