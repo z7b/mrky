@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Mrky — جلسة المراجعة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="mrky-review-container">
+
+    <!-- ─── Header ─── -->
+    <header class="review-header">
+      <div class="header-top">
+        <div class="logo-area">
+          <span class="logo-icon">🎓</span>
+          <span class="logo-title">Mrky</span>
+        </div>
+        <div class="session-meta">
+          <div class="streak-badge" id="streak-badge" title="سلسلة الإجابات الصحيحة">
+            <span class="streak-fire">🔥</span>
+            <span class="streak-count" id="streak-count">0</span>
+          </div>
+          <div id="progress-text" class="progress-text">0 / 0</div>
+        </div>
+      </div>
+      <div class="progress-bar-container">
+        <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+      </div>
+    </header>
+
+    <!-- ─── Card Area ─── -->
+    <main class="card-area">
+
+      <!-- Empty State — No cards due -->
+      <div id="empty-view" class="state-view hidden">
+        <div class="state-icon">📭</div>
+        <h2>لا توجد بطاقات للمراجعة</h2>
+        <p>أضف كلمات جديدة أثناء مشاهدتك للفيديوهات أو تصفح المقالات الإنجليزية.</p>
+        <button id="btn-close-empty" class="btn-primary">العودة</button>
+      </div>
+
+      <!-- Completion State -->
+      <div id="completion-view" class="state-view hidden">
+        <div class="state-icon">🎉</div>
+        <h2>أنهيت جلسة اليوم بنجاح!</h2>
+        <div class="session-stats" id="session-stats">
+          <div class="stat-item">
+            <span class="stat-value" id="stat-reviewed">0</span>
+            <span class="stat-label">تمت مراجعتها</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-correct">0</span>
+            <span class="stat-label">إجابة صحيحة</span>
+          </div>
+          <div class="stat-item">
+            <span class="stat-value" id="stat-accuracy">0%</span>
+            <span class="stat-label">الدقة</span>
+          </div>
+        </div>
+        <p class="completion-hint">عد غداً لمراجعة الكلمات الجديدة وتثبيت الذاكرة.</p>
+        <div class="completion-actions">
+          <button id="btn-restart-session" class="btn-primary btn-secondary-action">
+            <span>🔄 إعادة اختبار نفس الكلمات</span>
+          </button>
+          <button id="btn-review-hard" class="btn-primary btn-secondary-action hidden">
+            <span>🧠 مراجعة الكلمات الصعبة فقط</span>
+          </button>
+          <button id="btn-close-session" class="btn-primary">
+            <span>🚪 إنهاء والعودة لصفحة الفيديو</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Flashcard -->
+      <div id="flashcard" class="flashcard" role="button" tabindex="0" aria-label="بطاقة المراجعة">
+
+        <!-- Front (Question) -->
+        <div class="card-front">
+          <div class="card-front-top">
+            <span id="card-pos" class="word-pos">noun</span>
+            <div class="card-actions-top">
+              <button id="btn-speak" class="btn-icon" title="استمع للنطق" aria-label="استمع للنطق">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                </svg>
+              </button>
+              <button id="btn-delete-card" class="btn-icon btn-danger-icon" title="حذف البطاقة" aria-label="حذف البطاقة">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6"/>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+          <h1 id="card-word" class="word-text">word</h1>
+          <span class="hint-text desktop-only">مسافة لكشف الإجابة · أرقام 1-4 للتقييم</span>
+          <span class="hint-text mobile-only">انقر لكشف الإجابة</span>
+        </div>
+
+        <!-- Back (Answer) -->
+        <div id="card-back" class="card-back hidden">
+          <!-- Translation -->
+          <div class="answer-section">
+            <h2 id="card-translation" class="translation-text">الترجمة</h2>
+          </div>
+
+          <!-- Screenshot -->
+          <div id="screenshot-container" class="screenshot-container hidden">
+            <img id="card-screenshot" src="" alt="لقطة المشهد" loading="lazy">
+          </div>
+
+          <!-- Context Sentence -->
+          <div class="context-section">
+            <div class="context-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span>سياق الجملة</span>
+            </div>
+            <p id="card-sentence" class="sentence-text">I found this word in a sentence.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ─── Controls (Footer) ─── -->
+    <footer class="review-controls">
+      <!-- Show Answer -->
+      <div id="show-answer-panel" class="show-answer-panel">
+        <button id="btn-show-answer" class="btn-primary btn-reveal">
+          <span>كشف الإجابة</span>
+          <kbd class="kbd-hint desktop-only">Space</kbd>
+        </button>
+      </div>
+
+      <!-- Rating -->
+      <div id="rating-panel" class="rating-panel hidden">
+        <p class="rating-title">كيف كانت درجة تذكرك؟</p>
+        <div class="rating-buttons">
+          <button class="btn-rate btn-rate-0" data-quality="0">
+            <span class="rate-emoji">😭</span>
+            <span class="rate-label">نسيتها</span>
+            <kbd class="kbd-hint desktop-only">1</kbd>
+          </button>
+          <button class="btn-rate btn-rate-3" data-quality="3">
+            <span class="rate-emoji">😕</span>
+            <span class="rate-label">صعبة</span>
+            <kbd class="kbd-hint desktop-only">2</kbd>
+          </button>
+          <button class="btn-rate btn-rate-4" data-quality="4">
+            <span class="rate-emoji">🙂</span>
+            <span class="rate-label">جيد</span>
+            <kbd class="kbd-hint desktop-only">3</kbd>
+          </button>
+          <button class="btn-rate btn-rate-5" data-quality="5">
+            <span class="rate-emoji">😎</span>
+            <span class="rate-label">سهلة</span>
+            <kbd class="kbd-hint desktop-only">4</kbd>
+          </button>
+        </div>
+        <button id="btn-undo" class="btn-undo hidden" title="تراجع عن التقييم السابق">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="1 4 1 10 7 10"/>
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+          </svg>
+          <span>تراجع</span>
+        </button>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- Toast notifications -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="main.js"></script>
+</body>
+</html>

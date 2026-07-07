@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mrky — المشغل المحلي</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="../content.css"> <!-- Reuse content styles for overlays/tooltips -->
+</head>
+<body>
+  <div class="mrky-player-app">
+    <!-- Dropzone View -->
+    <div id="dropzone" class="dropzone">
+      <div class="dropzone-content">
+        <span class="dropzone-icon">🎬</span>
+        <h1>اسحب وأفلت ملف الفيديو والترجمة هنا</h1>
+        <p>يدعم صيغ MP4/MKV وملفات الترجمة بصيغة SRT</p>
+        <div class="file-selectors">
+          <label class="btn-secondary">
+            اختر ملف الفيديو
+            <input type="file" id="video-file-input" accept="video/mp4,video/mkv,video/webm" style="display:none">
+          </label>
+          <label class="btn-secondary">
+            اختر ملف الترجمة (.srt)
+            <input type="file" id="subtitle-file-input" accept=".srt" style="display:none">
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Player Interface -->
+    <div id="player-container" class="player-container hidden">
+      <header class="player-header">
+        <button id="btn-back" class="btn-back" title="العودة">✕</button>
+        <span id="video-title" class="video-title">اسم الملف</span>
+      </header>
+
+      <div class="video-wrapper">
+        <video id="local-video" controls="false"></video>
+        <!-- Interactive Subtitles Overlay will be positioned here -->
+      </div>
+    </div>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
