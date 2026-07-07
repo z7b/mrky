@@ -56,8 +56,9 @@ document.addEventListener('DOMContentLoaded', async () => {
       const word = btn.dataset.word;
       if (word) {
         btn.classList.add('playing');
-        playPronunciation(word, 'en-US').finally(() => {
-          btn.classList.remove('playing');
+        playPronunciation(word, {
+          onEnd: () => btn.classList.remove('playing'),
+          onError: () => btn.classList.remove('playing'),
         });
       }
     }
