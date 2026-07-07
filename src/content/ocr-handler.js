@@ -11,6 +11,7 @@ import { translateViaBackground } from '../shared/translate.js';
 import { getKnownWordsSet, addCard } from '../shared/db.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 import { mrkyEnabled } from './enabled-state.js';
+import { playPronunciation } from '../shared/audio.js';
 
 let isOCRMode = false;
 let isImageScanMode = false;
@@ -239,7 +240,7 @@ async function showOCRResultPanel(text, analyzed) {
   document.querySelectorAll('.mrky-ocr-result').forEach(p => p.remove());
 
   const panel = document.createElement('div');
-  panel.className = 'mrky-ocr-result';
+  panel.className = 'mrky-ocr-panel mrky-tooltip mrky-tooltip-visible';
 
   let coloredHTML = '';
   for (const item of analyzed) {
@@ -248,18 +249,35 @@ async function showOCRResultPanel(text, analyzed) {
   }
 
   panel.innerHTML = `
-    <div class="mrky-ocr-result-header">
-      <span>📷 النص المستخرج</span>
-      <button class="mrky-ocr-close">✕</button>
-    </div>
-    <div class="mrky-ocr-result-text">${coloredHTML || text}</div>
-    <div class="mrky-ocr-result-translation">جاري الترجمة...</div>
-    <div class="mrky-ocr-result-actions">
-      <button class="mrky-btn-add" disabled>⏳ جاري الترجمة...</button>
+    <div class="mrky-tooltip-inner" style="min-width: 250px; text-align: center;">
+      <div class="mrky-tooltip-header">
+        <span class="mrky-tooltip-pos" style="background: #EF4444; color: #fff;">OCR</span>
+        <span class="mrky-tooltip-word" style="font-size: 16px;">${coloredHTML || text}</span>
+        <button class="mrky-btn-speak mrky-ocr-speak" title="انطق النص">🔊</button>
+        <button class="mrky-ocr-close" style="background:transparent;border:none;color:#9ca3af;cursor:pointer;padding:0 5px;margin-right:auto;font-size:16px;">✕</button>
+      </div>
+      <div class="mrky-tooltip-translation mrky-ocr-result-translation">
+        <span class="mrky-tooltip-loading">جاري الترجمة...</span>
+      </div>
+      <div class="mrky-tooltip-actions">
+        <button class="mrky-btn-add" disabled>⏳ جاري الترجمة...</button>
+      </div>
     </div>
   `;
 
   panel.querySelector('.mrky-ocr-close').addEventListener('click', () => panel.remove());
+
+  // Handle Speech
+  const speakBtn = panel.querySelector('.mrky-ocr-speak');
+  if (speakBtn) {
+    speakBtn.addEventListener('click', () => {
+      playPronunciation(text, {
+        onStart: () => speakBtn.classList.add('mrky-btn-speak-active'),
+        onEnd: () => speakBtn.classList.remove('mrky-btn-speak-active'),
+        onError: () => speakBtn.classList.remove('mrky-btn-speak-active'),
+      });
+    });
+  }
 
   panel.querySelector('.mrky-btn-add').addEventListener('click', async () => {
     const btn = panel.querySelector('.mrky-btn-add');
