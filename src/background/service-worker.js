@@ -281,33 +281,61 @@ async function handleGetAudio(payload = {}, sendResponse) {
     let audioBuffer = null;
     let mimeType = 'audio/mp3';
 
-    // 1. Try Free Dictionary API (Actual Human recorded Oxford / Wiktionary audio)
+    // ── SOURCE 1: Free Dictionary API (Real human Wiktionary/Oxford recordings) ──
     try {
       const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(word)}`);
       if (dictRes.ok) {
         const data = await dictRes.json();
         let audioUrl = '';
-        if (Array.isArray(data) && data[0]?.phonetics) {
-          // Prefer American English (-us.mp3) or UK (-uk.mp3), otherwise any valid audio URL
-          const usPhonetic = data[0].phonetics.find(p => p.audio && p.audio.includes('-us.mp3'));
-          const ukPhonetic = data[0].phonetics.find(p => p.audio && p.audio.includes('-uk.mp3'));
-          const anyPhonetic = data[0].phonetics.find(p => p.audio && p.audio.length > 0);
-          const chosen = usPhonetic || ukPhonetic || anyPhonetic;
-          if (chosen) audioUrl = chosen.audio;
+        if (Array.isArray(data)) {
+          for (const entry of data) {
+            if (entry.phonetics && Array.isArray(entry.phonetics)) {
+              const us = entry.phonetics.find(p => p.audio && p.audio.includes('-us.mp3'));
+              const uk = entry.phonetics.find(p => p.audio && p.audio.includes('-uk.mp3'));
+              const any = entry.phonetics.find(p => p.audio && p.audio.length > 0);
+              const chosen = us || uk || any;
+              if (chosen) {
+                audioUrl = chosen.audio;
+                break;
+              }
+            }
+          }
         }
         if (audioUrl) {
           if (audioUrl.startsWith('//')) audioUrl = 'https:' + audioUrl;
           const audioRes = await fetch(audioUrl);
           if (audioRes.ok) {
             audioBuffer = await audioRes.arrayBuffer();
+            console.log(`[Mrky Audio] ✅ Fetched human audio for "${word}" from Wiktionary`);
           }
         }
       }
     } catch (err) {
-      console.warn('[Mrky] Free Dictionary API audio failed for:', word, err);
+      console.warn('[Mrky Audio] Free Dictionary API failed for:', word, err);
     }
 
-    // 2. If Free Dictionary API didn't return audio, fallback to Google Translate Neural TTS (WaveNet)
+    // ── SOURCE 2: Google Dictionary (Real human recordings hosted by Google) ──
+    if (!audioBuffer) {
+      const googleDictUrls = [
+        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${word}--_us_1.mp3`,
+        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${word}--_gb_1.mp3`,
+        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${word}--_us_2.mp3`,
+      ];
+      for (const url of googleDictUrls) {
+        try {
+          const audioRes = await fetch(url);
+          if (audioRes.ok) {
+            audioBuffer = await audioRes.arrayBuffer();
+            console.log(`[Mrky Audio] ✅ Fetched human audio for "${word}" from Google Dictionary`);
+            break;
+          }
+        } catch (err) {
+          // Silently continue to next URL
+        }
+      }
+    }
+
+    // ── SOURCE 3: Google Translate Neural TTS (WaveNet — near-human quality) ──
     if (!audioBuffer) {
       const ttsUrls = [
         `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en-US&q=${encodeURIComponent(word)}`,
@@ -318,10 +346,11 @@ async function handleGetAudio(payload = {}, sendResponse) {
           const ttsRes = await fetch(ttsUrl);
           if (ttsRes.ok) {
             audioBuffer = await ttsRes.arrayBuffer();
+            console.log(`[Mrky Audio] Fetched neural TTS for "${word}" from Google Translate`);
             break;
           }
         } catch (err) {
-          console.warn('[Mrky] Google TTS endpoint failed for:', word, err);
+          console.warn('[Mrky Audio] Google TTS endpoint failed for:', word, err);
         }
       }
     }
@@ -350,7 +379,7 @@ async function handleGetAudio(payload = {}, sendResponse) {
 
     sendResponse({ audioUrl: dataUrl });
   } catch (error) {
-    console.error('[Mrky] handleGetAudio error:', error);
+    console.error('[Mrky Audio] handleGetAudio error:', error);
     sendResponse({ error: error.message });
   }
 }
