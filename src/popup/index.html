@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mrky — لوحة التحكم</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="mrky-popup">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="logo-area">
+        <span class="logo-icon">🎓</span>
+        <h1 class="logo-title">Mrky</h1>
+      </div>
+      <div class="header-actions">
+        <button id="btn-open-pdf" class="btn-secondary btn-header-action" title="قارئ ملفات PDF">
+          <span>📄 قارئ PDF</span>
+        </button>
+        <button id="btn-open-player" class="btn-secondary btn-header-action" title="مشغل الفيديو المحلي">
+          <span>🎬 المشغل المحلي</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Extension ON/OFF Toggle Control Bar -->
+    <section class="toggle-control-section" id="toggle-section">
+      <div class="toggle-control-box">
+        <div class="toggle-status-info">
+          <span class="toggle-status-dot" id="status-dot">🟢</span>
+          <span class="toggle-status-label" id="status-label">الإضافة تعمل على جميع المواقع</span>
+        </div>
+        <button id="btn-toggle-enable" class="btn-toggle-state enabled" title="إيقاف أو تشغيل أداة Mrky">
+          <span id="btn-toggle-icon">⚡</span>
+          <span id="btn-toggle-text">مفعل</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- OCR Selection Card -->
+    <section class="ocr-control-section" id="ocr-section">
+      <div class="ocr-control-card">
+        <div class="ocr-card-header">
+          <span class="ocr-title-icon">📷</span>
+          <div class="ocr-title-desc">
+            <h3>استخراج نصوص الصور (OCR)</h3>
+            <p>تحديد النصوص وترجمتها من الشاشة مباشرة</p>
+          </div>
+        </div>
+        <button id="btn-trigger-ocr" class="btn-ocr-start" title="بدء تحديد نص من الشاشة">
+          <span>تحديد</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Hero Stats -->
+    <section class="stats-hero">
+      <div class="stat-card">
+        <span class="stat-val" id="stat-cards-count">0</span>
+        <span class="stat-label">كلمة محفوظة</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-val" id="stat-known-count">0</span>
+        <span class="stat-label">كلمة معروفة</span>
+      </div>
+    </section>
+
+    <!-- Call to Action -->
+    <section class="action-section" id="review-action-section">
+      <div class="action-box">
+        <div class="action-info">
+          <h3>جلسة المراجعة اليومية</h3>
+          <p><span id="due-count">0</span> كلمات جاهزة للمراجعة بالتكرار المتباعد</p>
+        </div>
+        <div class="action-buttons-group">
+          <button id="btn-start-review" class="btn-primary" disabled>ابدأ المراجعة</button>
+          <button id="btn-review-all" class="btn-secondary btn-review-all" disabled>مراجعة الكل 📚</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Recent Words -->
+    <section class="recent-section">
+      <div class="section-title">
+        <h2>الكلمات المضافة حديثاً</h2>
+      </div>
+      <div class="words-list" id="words-list">
+        <div class="empty-state">
+          <span class="empty-icon">📝</span>
+          <p>لم تحفظ أي كلمات بعد. ابدأ بمشاهدة يوتيوب واحفظ كلماتك الأولى!</p>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>

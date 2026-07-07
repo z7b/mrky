@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mrky — قارئ ملفات PDF التفاعلي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Load Local PDF.js Library -->
+  <script src="../pdfjs/pdf.min.js"></script>
+  
+  <!-- Inject base Content Script CSS before PDF styles -->
+  <link rel="stylesheet" href="../content.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="pdf-reader-container">
+    <!-- Header / Toolbar -->
+    <header class="reader-header">
+      <div class="header-right">
+        <span class="logo-icon">🎓</span>
+        <h1 class="logo-title">Mrky PDF</h1>
+      </div>
+      
+      <!-- Navigation Controls (Visible when PDF is loaded) -->
+      <div id="reader-controls" class="reader-controls hidden">
+        <button id="btn-prev" class="control-btn" title="الصفحة السابقة">◀</button>
+        <span class="page-info">
+          صفحة <span id="page-num">0</span> من <span id="page-count">0</span>
+        </span>
+        <button id="btn-next" class="control-btn" title="الصفحة التالية">▶</button>
+        
+        <div class="divider"></div>
+        
+        <button id="btn-zoom-out" class="control-btn" title="تصغير">➖</button>
+        <span id="zoom-text" class="zoom-info">130%</span>
+        <button id="btn-zoom-in" class="control-btn" title="تكبير">➕</button>
+        
+        <div class="divider"></div>
+        
+        <button id="btn-pdf-ocr" class="control-btn btn-ocr-highlight" title="تحديد واستخراج النص (OCR)">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+            <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+            <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+            <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+            <path d="M9 15l3-6 3 6"/>
+            <path d="M10 13h4"/>
+          </svg>
+          <span class="ocr-btn-text">تحديد النص</span>
+        </button>
+
+      <div class="header-left">
+        <button id="btn-load-new" class="btn-primary btn-sm hidden">فتح ملف آخر 📂</button>
+      </div>
+    </header>
+
+    <!-- Main Workspace Area -->
+    <main class="reader-workspace">
+      <!-- Drag & Drop PDF Load Section -->
+      <div id="drop-zone" class="drop-zone">
+        <div class="drop-zone-content">
+          <span class="drop-icon">📄</span>
+          <h2>قم بسحب وإفلات ملف PDF هنا</h2>
+          <p>أو انقر لاختيار ملف من جهازك لبدء ترجمة وحفظ الكلمات الإنجليزية مباشرة أثناء القراءة</p>
+          <input type="file" id="file-input" accept="application/pdf" style="display: none;">
+          <button id="btn-select-file" class="btn-primary">اختر ملف PDF</button>
+        </div>
+      </div>
+
+      <!-- Rendered PDF Page Output Container -->
+      <div id="viewer-container" class="viewer-container hidden">
+        <div id="pdf-viewer" class="pdf-viewer"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Inject Content Script logic for hover card tooltips -->
+  <script src="../content.js"></script>
+  <!-- Load Reader script -->
+  <script src="main.js"></script>
+</body>
+</html>
