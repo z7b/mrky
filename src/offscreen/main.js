@@ -76,15 +76,15 @@ async function handleOCR(imageSource, sendResponse) {
  * @param {Function} sendResponse - Callback when speech ends or fails
  */
 async function playWordAudio(word, sendResponse) {
-  const cleanWord = (word || '').trim().toLowerCase();
+  const cleanWord = (word || '').trim();
   if (!cleanWord) {
     sendResponse({ error: 'No word provided' });
     return;
   }
 
-  // Security: Validate word format — allow only letters, hyphens, apostrophes, spaces
-  if (!/^[a-z '-]+$/i.test(cleanWord) || cleanWord.length > 100) {
-    sendResponse({ error: 'Invalid word format' });
+  // Security & Usability: Allow basic punctuation for phrases/sentences up to 300 chars
+  if (!/^[a-z0-9 '.,!?-]+$/i.test(cleanWord) || cleanWord.length > 300) {
+    sendResponse({ error: 'Invalid word or sentence format' });
     return;
   }
 
@@ -100,49 +100,70 @@ async function playWordAudio(word, sendResponse) {
     window.speechSynthesis.cancel();
   }
 
+  const cacheKey = cleanWord.toLowerCase();
+
   try {
     let audioUrl = null;
     let audioSource = 'unknown';
 
     // Check cache first
-    const cached = audioCache.get(cleanWord);
+    const cached = audioCache.get(cacheKey);
     if (cached) {
       audioUrl = cached.url;
       audioSource = cached.source;
     }
 
     if (!audioUrl) {
-      // ── SOURCE 1: Free Dictionary API (Real human Wiktionary/Oxford recordings) ──
-      try {
-        const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`);
-        if (dictRes.ok) {
-          const data = await dictRes.json();
-          if (Array.isArray(data)) {
-            for (const entry of data) {
-              if (entry.phonetics && Array.isArray(entry.phonetics)) {
-                // Prefer American English (-us.mp3), then UK (-uk.mp3), then Australian (-au.mp3)
-                const us = entry.phonetics.find(p => p.audio && p.audio.includes('-us.mp3'));
-                const uk = entry.phonetics.find(p => p.audio && p.audio.includes('-uk.mp3'));
-                const au = entry.phonetics.find(p => p.audio && p.audio.includes('-au.mp3'));
-                const any = entry.phonetics.find(p => p.audio && p.audio.length > 0);
-                const chosen = us || uk || au || any;
-                if (chosen) {
-                  audioUrl = chosen.audio;
-                  if (audioUrl.startsWith('//')) audioUrl = 'https:' + audioUrl;
-                  audioSource = 'human_wiktionary';
-                  break;
+      // ── SOURCE 1: Google Translate Neural TTS (WaveNet — near-human quality) ──
+      const ttsUrls = [
+        `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en-US&q=${encodeURIComponent(cleanWord)}`,
+        `https://translate.google.com/translate_tts?ie=UTF-8&client=dict-chrome-ex&tl=en-US&q=${encodeURIComponent(cleanWord)}`
+      ];
+      for (const url of ttsUrls) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            audioUrl = url;
+            audioSource = 'neural_google_tts';
+            break;
+          }
+        } catch (err) {
+          console.warn('[Mrky Audio] Google TTS failed:', err);
+        }
+      }
+
+      // ── SOURCE 2: Free Dictionary API (Real human Wiktionary/Oxford recordings fallback) ──
+      if (!audioUrl) {
+        try {
+          const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`);
+          if (dictRes.ok) {
+            const data = await dictRes.json();
+            if (Array.isArray(data)) {
+              for (const entry of data) {
+                if (entry.phonetics && Array.isArray(entry.phonetics)) {
+                  // Prefer American English (-us.mp3), then UK (-uk.mp3), then Australian (-au.mp3)
+                  const us = entry.phonetics.find(p => p.audio && p.audio.includes('-us.mp3'));
+                  const uk = entry.phonetics.find(p => p.audio && p.audio.includes('-uk.mp3'));
+                  const au = entry.phonetics.find(p => p.audio && p.audio.includes('-au.mp3'));
+                  const any = entry.phonetics.find(p => p.audio && p.audio.length > 0);
+                  const chosen = us || uk || au || any;
+                  if (chosen) {
+                    audioUrl = chosen.audio;
+                    if (audioUrl.startsWith('//')) audioUrl = 'https:' + audioUrl;
+                    audioSource = 'human_wiktionary';
+                    break;
+                  }
                 }
               }
             }
           }
+        } catch (err) {
+          console.warn('[Mrky Audio] Free Dictionary API failed for:', cleanWord, err);
         }
-      } catch (err) {
-        console.warn('[Mrky Audio] Free Dictionary API failed for:', cleanWord, err);
       }
 
-      // ── SOURCE 2: Google Dictionary (Real human recordings hosted by Google) ──
+      // ── SOURCE 3: Google Dictionary (Real human recordings hosted by Google fallback) ──
       if (!audioUrl) {
-        // Security: Encode the word to prevent path traversal in URLs
         const safeWord = encodeURIComponent(cleanWord);
         const googleDictUrls = [
           `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_us_1.mp3`,
@@ -158,27 +179,7 @@ async function playWordAudio(word, sendResponse) {
               break;
             }
           } catch (err) {
-            // Silently continue to next URL
-          }
-        }
-      }
-
-      // ── SOURCE 3: Google Translate Neural TTS (WaveNet — near-human quality) ──
-      if (!audioUrl) {
-        const ttsUrls = [
-          `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en-US&q=${encodeURIComponent(cleanWord)}`,
-          `https://translate.google.com/translate_tts?ie=UTF-8&client=dict-chrome-ex&tl=en-US&q=${encodeURIComponent(cleanWord)}`
-        ];
-        for (const url of ttsUrls) {
-          try {
-            const res = await fetch(url);
-            if (res.ok) {
-              audioUrl = url;
-              audioSource = 'neural_google_tts';
-              break;
-            }
-          } catch (err) {
-            console.warn('[Mrky Audio] Google TTS failed:', err);
+            // Silently continue
           }
         }
       }
@@ -190,7 +191,7 @@ async function playWordAudio(word, sendResponse) {
         const firstKey = audioCache.keys().next().value;
         audioCache.delete(firstKey);
       }
-      audioCache.set(cleanWord, { url: audioUrl, source: audioSource });
+      audioCache.set(cacheKey, { url: audioUrl, source: audioSource });
 
       const audio = new Audio(audioUrl);
       currentAudio = audio;
