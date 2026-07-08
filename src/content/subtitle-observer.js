@@ -5,7 +5,7 @@
  */
 import { analyzeText } from '../shared/nlp-processor.js';
 import { getKnownWordsSet } from '../shared/db.js';
-import { renderSubtitles, clearOverlay } from './overlay-renderer.js';
+import { renderSubtitles, clearOverlay, initOverlay } from './overlay-renderer.js';
 import { mrkyEnabled } from './enabled-state.js';
 
 let observer = null; // Parent observer (watches for container presence)
@@ -13,6 +13,8 @@ let subtitleObserver = null; // Target observer (watches for caption text change
 let lastSubtitleText = '';
 let knownWords = new Set();
 let currentPlatform = '';
+let pendingFrame = null; // RAF debounce handle for batching rapid mutations
+let cachedVideoEl = null; // Cached video element reference
 
 /**
  * Start observing subtitles for a specific platform.
@@ -33,6 +35,12 @@ export async function startVideoObserver(platform) {
     console.warn(`[Mrky] ${platform} player not found`);
     return;
   }
+
+  // Initialize the overlay inside the video player container for native fullscreen support & zero-lag layout
+  initOverlay(player);
+
+  // Cache video element reference to avoid repeated document.querySelector calls
+  cachedVideoEl = player.querySelector('video') || document.querySelector('video');
 
   console.log(`[Mrky] ${platform} player detected. Starting subtitle observer...`);
 
@@ -74,6 +82,9 @@ export async function startVideoObserver(platform) {
 
 /**
  * Observe the specific subtitle container.
+ * Uses requestAnimationFrame batching to coalesce rapid mutations into a single
+ * processing call per frame (~60fps / 16ms), preventing CPU flooding from
+ * YouTube's character-by-character rolling caption updates.
  * @param {HTMLElement} container
  */
 function observeSubtitleContainer(container) {
@@ -83,7 +94,12 @@ function observeSubtitleContainer(container) {
 
   console.log('[Mrky] Attaching target observer directly to subtitle container');
   subtitleObserver = new MutationObserver(() => {
-    checkForCaptions();
+    // Batch all mutations within the same animation frame into one processing call
+    if (pendingFrame) return; // Already scheduled — skip
+    pendingFrame = requestAnimationFrame(() => {
+      pendingFrame = null;
+      checkForCaptions();
+    });
   });
 
   subtitleObserver.targetElement = container;
@@ -116,30 +132,88 @@ function checkForCaptions() {
   // Skip ALL processing if extension is disabled
   if (!mrkyEnabled) return;
 
-  const captionSegments = document.querySelectorAll(
-    '.ytp-caption-segment, .captions-text span, .caption-visual-line, .player-timedtext-text-container span, .dss-subtitle-container span, .dss-subtitle-container p'
-  );
+  // Choose platform-specific selectors to avoid duplicate layout overlays or cross-platform text overlaps
+  let selectors = [];
+  if (currentPlatform === 'youtube') {
+    selectors = ['.ytp-caption-segment'];
+  } else if (currentPlatform === 'netflix') {
+    selectors = ['.player-timedtext-text-container span'];
+  } else if (currentPlatform === 'disneyplus') {
+    selectors = ['.dss-subtitle-container span', '.dss-subtitle-container p'];
+  } else {
+    // General fallback
+    selectors = [
+      '.ytp-caption-segment',
+      '.player-timedtext-text-container span',
+      '.dss-subtitle-container span'
+    ];
+  }
 
-  if (captionSegments.length === 0) {
+  // Find target caption container to restrict DOM querying (huge performance boost)
+  let container = subtitleObserver?.targetElement;
+  if (!container) {
+    let subtitleContainerSelector = '.ytp-caption-window-container';
+    if (currentPlatform === 'netflix') subtitleContainerSelector = '.player-timedtext';
+    if (currentPlatform === 'disneyplus') subtitleContainerSelector = '.dss-subtitle-container';
+    container = document.querySelector(subtitleContainerSelector);
+  }
+
+  if (!container) {
     clearOverlay();
     lastSubtitleText = '';
     return;
   }
 
-  // Combine all caption segment texts
-  let fullText = '';
-  captionSegments.forEach((seg) => {
-    fullText += seg.textContent + ' ';
-  });
-  fullText = fullText.trim();
+  // Query only within the active caption container to bypass full document scan
+  const allSegments = container.querySelectorAll(selectors.join(', '));
 
-  // Skip if same text as before (avoid re-processing)
+  if (allSegments.length === 0) {
+    clearOverlay();
+    lastSubtitleText = '';
+    return;
+  }
+
+  // Filter segments — lightweight checks only (no forced layout reflow):
+  // 1. Must have text content
+  // 2. Must not be hidden via CSS (display:none or visibility:hidden)
+  // IMPORTANT: We avoid offsetWidth/offsetHeight/getClientRects here because they
+  // force a synchronous layout reflow which is extremely expensive at 60fps.
+  const activeSegments = Array.from(allSegments).filter((seg) => {
+    if (!seg.textContent || !seg.textContent.trim()) return false;
+
+    // Lightweight hidden check: walk up the tree to find display:none
+    // YouTube hides old caption segments by removing them from DOM (childList mutation),
+    // so segments still in the container are virtually always visible.
+    // Only check the segment's own style for a definitive hidden state.
+    const style = seg.style;
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+    return true;
+  });
+
+  // Filter out any parent node if its child is also matched (prevents double text duplication)
+  const leafSegments = activeSegments.length <= 1 ? activeSegments : activeSegments.filter((seg) => {
+    const hasChildMatched = activeSegments.some(other => other !== seg && seg.contains(other));
+    return !hasChildMatched;
+  });
+
+  if (leafSegments.length === 0) {
+    clearOverlay();
+    lastSubtitleText = '';
+    return;
+  }
+
+  // Combine leaf segments texts cleanly using array join (faster than string concatenation)
+  const fullText = leafSegments.map(seg => seg.textContent).join(' ').trim().replace(/\s+/g, ' ');
+
+  // Skip if same text as before (avoid redundant processing)
   if (fullText === lastSubtitleText || !fullText) return;
   lastSubtitleText = fullText;
 
-  // Get video element for positioning
-  const video = document.querySelector('video');
+  // Use cached video reference — avoids document.querySelector on every update
+  const video = cachedVideoEl || document.querySelector('video');
   if (!video) return;
+  if (!cachedVideoEl) cachedVideoEl = video; // Cache for future calls
   const videoRect = video.getBoundingClientRect();
 
   // Hide original captions (make them invisible but keep DOM structure for the observer)

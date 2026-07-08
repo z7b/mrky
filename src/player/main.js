@@ -13,6 +13,7 @@ let subtitleCues = [];
 let knownWords = new Set();
 let videoFile = null;
 let subtitleFile = null;
+let videoBlobUrl = null; // Track blob URL for proper cleanup
 
 document.addEventListener('DOMContentLoaded', async () => {
   // Load database known words list
@@ -70,6 +71,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Stop playback
     videoEl.pause();
     videoEl.src = '';
+    // Memory cleanup: revoke blob URL to prevent memory leak
+    if (videoBlobUrl) {
+      URL.revokeObjectURL(videoBlobUrl);
+      videoBlobUrl = null;
+    }
     subtitleCues = [];
     clearOverlay();
 
@@ -108,8 +114,14 @@ function checkAndLaunch() {
 
   titleEl.textContent = videoFile.name;
 
+  // Revoke previous blob URL if exists
+  if (videoBlobUrl) {
+    URL.revokeObjectURL(videoBlobUrl);
+  }
+
   // Set local video stream
-  videoEl.src = URL.createObjectURL(videoFile);
+  videoBlobUrl = URL.createObjectURL(videoFile);
+  videoEl.src = videoBlobUrl;
   videoEl.controls = true;
 
   // Load SRT Subtitles if selected

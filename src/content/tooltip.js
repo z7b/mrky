@@ -9,6 +9,7 @@ import { playPronunciation } from '../shared/audio.js';
 import { mrkyEnabled } from './enabled-state.js';
 import { analyzeText } from '../shared/nlp-processor.js';
 import { getKnownWordsSet } from '../shared/db.js';
+import { generateExplanation } from '../shared/grammar-explainer.js';
 
 let tooltipEl = null;
 let currentWord = null;
@@ -38,6 +39,19 @@ export function initTooltip() {
         <button class="mrky-btn-add" title="أضف بطاقة">+ أضف بطاقة</button>
         <button class="mrky-btn-known" title="أعرف هذي الكلمة">✓ أعرفها</button>
       </div>
+      <div class="mrky-tooltip-secondary-actions">
+        <button class="mrky-btn-translate-sentence" title="ترجمة الجملة كاملة وسياقها">
+          <span>🌐</span> <span>ترجمة الجملة</span>
+        </button>
+        <button class="mrky-btn-explain" title="تحليل وتعليل الكلمة نحوياً وصوتياً">
+          <span>🧠</span> <span>علل</span>
+        </button>
+      </div>
+      <div class="mrky-tooltip-sentence-box hidden" role="region" aria-live="polite">
+        <div class="mrky-sentence-en"></div>
+        <div class="mrky-sentence-ar"></div>
+      </div>
+      <div class="mrky-tooltip-explain-box hidden" role="region" aria-live="polite"></div>
     </div>
     <div class="mrky-tooltip-arrow"></div>
   `;
@@ -56,6 +70,12 @@ export function initTooltip() {
 
   // "I know this" button
   tooltipEl.querySelector('.mrky-btn-known').addEventListener('click', handleMarkKnown);
+
+  // "Translate Sentence" button
+  tooltipEl.querySelector('.mrky-btn-translate-sentence').addEventListener('click', handleTranslateSentence);
+
+  // "Explain Word" button (Grammar + Phonetics)
+  tooltipEl.querySelector('.mrky-btn-explain').addEventListener('click', handleExplainWord);
 
   // "Speak" button
   tooltipEl.querySelector('.mrky-btn-speak').addEventListener('click', handleSpeak);
@@ -217,6 +237,44 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
     addBtn.textContent = '⏳ جاري الترجمة...';
   }
 
+  // Control "Translate Sentence" and "Explain" buttons visibility (Only for Videos and Articles, not OCR or single words)
+  const secActions = tooltipEl.querySelector('.mrky-tooltip-secondary-actions');
+  const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
+  const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
+  const translateSentBtn = tooltipEl.querySelector('.mrky-btn-translate-sentence');
+  const explainBtn = tooltipEl.querySelector('.mrky-btn-explain');
+
+  if (sentenceBox) sentenceBox.classList.add('hidden'); // Reset sentence box on new word click
+  if (explainBox) explainBox.classList.add('hidden');   // Reset explain box on new word click
+
+  const isOcr = wordEl.closest && wordEl.closest('.mrky-ocr-panel') !== null;
+  const wordCount = sentence ? sentence.trim().split(/\s+/).length : 0;
+  const isSameAsWord = sentence && sentence.trim().toLowerCase() === word.trim().toLowerCase();
+
+  if (secActions) {
+    if (!isOcr && sentence && wordCount > 2 && !isSameAsWord) {
+      // Video / Article mode: show both buttons side by side
+      secActions.style.display = 'flex';
+      if (translateSentBtn) {
+        translateSentBtn.style.display = '';  // Reset from any previous hiding
+        translateSentBtn.disabled = false;
+        translateSentBtn.innerHTML = '<span>🌐</span> <span>ترجمة الجملة</span>';
+      }
+      if (explainBtn) {
+        explainBtn.style.display = '';  // Reset from any previous hiding
+        explainBtn.innerHTML = '<span>🧠</span> <span>علل</span>';
+      }
+    } else {
+      // Single word or OCR: show only "Explain" button
+      secActions.style.display = 'flex';
+      if (translateSentBtn) translateSentBtn.style.display = 'none';
+      if (explainBtn) {
+        explainBtn.style.display = '';
+        explainBtn.innerHTML = '<span>🧠</span> <span>علل</span>';
+      }
+    }
+  }
+
   // Position the tooltip above the word
   positionTooltip(wordEl);
   tooltipEl.classList.add('mrky-tooltip-visible');
@@ -321,8 +379,13 @@ function positionTooltip(wordEl) {
 
 /**
  * Handle "Add Card" button click.
+ * @param {Event} e
  */
-async function handleAddCard() {
+async function handleAddCard(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
   if (!currentWord) return;
 
   const btn = tooltipEl.querySelector('.mrky-btn-add');
@@ -360,8 +423,13 @@ async function handleAddCard() {
 
 /**
  * Handle "I know this" button click.
+ * @param {Event} e
  */
-async function handleMarkKnown() {
+async function handleMarkKnown(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
   if (!currentWord) return;
 
   const btn = tooltipEl.querySelector('.mrky-btn-known');
@@ -389,8 +457,13 @@ async function handleMarkKnown() {
 
 /**
  * Handle "Speak" button click — pronounce the word using real human/neural audio.
+ * @param {Event} e
  */
-function handleSpeak() {
+function handleSpeak(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
   if (!currentWord) return;
 
   const btn = tooltipEl.querySelector('.mrky-btn-speak');
@@ -399,6 +472,91 @@ function handleSpeak() {
     onEnd: () => btn.classList.remove('mrky-btn-speak-active'),
     onError: () => btn.classList.remove('mrky-btn-speak-active'),
   });
+}
+
+/**
+ * Handle "Translate Sentence" button click.
+ * Translates the full subtitle sentence or paragraph context seamlessly.
+ * @param {Event} e
+ */
+async function handleTranslateSentence(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+  if (!currentWord || !currentWord.sentence) return;
+
+  const btn = tooltipEl.querySelector('.mrky-btn-translate-sentence');
+  const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
+  const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
+  const enEl = sentenceBox.querySelector('.mrky-sentence-en');
+  const arEl = sentenceBox.querySelector('.mrky-sentence-ar');
+
+  // Hide explain box if open (mutual exclusion)
+  if (explainBox) explainBox.classList.add('hidden');
+
+  // Change button state to loading
+  btn.disabled = true;
+  btn.innerHTML = '<span>⏳</span> <span>جاري ترجمة الجملة...</span>';
+
+  // Show sentence box with English text and loading indicator
+  enEl.textContent = currentWord.sentence;
+  arEl.textContent = 'جاري صياغة الترجمة...';
+  sentenceBox.classList.remove('hidden');
+
+  try {
+    // Translate the entire sentence via background service worker (leverages LRU cache)
+    const res = await translateViaBackground(currentWord.sentence, '');
+    if (res && res.translation && !res.translation.includes('⚠')) {
+      arEl.textContent = res.translation;
+      btn.innerHTML = '<span>✓</span> <span>تمت الترجمة</span>';
+    } else {
+      arEl.textContent = '⚠ تعذر ترجمة الجملة حالياً.';
+      btn.innerHTML = '<span>🌐</span> <span>إعادة المحاولة</span>';
+      btn.disabled = false;
+    }
+  } catch (err) {
+    console.error('[Mrky] Sentence translation error:', err);
+    arEl.textContent = '⚠ حدث خطأ في الاتصال.';
+    btn.disabled = false;
+    btn.innerHTML = '<span>🌐</span> <span>ترجمة الجملة</span>';
+  }
+}
+
+/**
+ * Handle "Explain Word" button click.
+ * Generates a local grammar + phonetics explanation using the rule-based engine.
+ * No API calls — runs instantly inside the browser.
+ * @param {Event} e
+ */
+function handleExplainWord(e) {
+  if (e) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+  if (!currentWord) return;
+
+  const btn = tooltipEl.querySelector('.mrky-btn-explain');
+  const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
+  const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
+
+  // Hide sentence translation box if open (mutual exclusion)
+  if (sentenceBox) sentenceBox.classList.add('hidden');
+
+  // Toggle: if already visible, hide it
+  if (!explainBox.classList.contains('hidden')) {
+    explainBox.classList.add('hidden');
+    btn.innerHTML = '<span>🧠</span> <span>علل</span>';
+    return;
+  }
+
+  // Generate explanation using the local rule-based engine (instant — no network)
+  const sentence = currentWord.sentence || currentWord.word;
+  const htmlContent = generateExplanation(currentWord.word, sentence);
+
+  explainBox.innerHTML = htmlContent;
+  explainBox.classList.remove('hidden');
+  btn.innerHTML = '<span>✓</span> <span>تم التعليل</span>';
 }
 
 /**
@@ -431,6 +589,10 @@ function captureScreenshot() {
   return new Promise((resolve) => {
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
         resolve(response?.screenshot || null);
       });
     } else {

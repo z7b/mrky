@@ -9,6 +9,7 @@
 
 const API_BASE = 'https://api.mymemory.translated.net/get';
 const CACHE_KEY = 'mrky_translation_cache';
+const MAX_CACHE_SIZE = 2000; // Maximum cached translations before eviction
 
 // In-memory cache to avoid redundant API calls
 let translationCache = {};
@@ -109,6 +110,16 @@ export async function translateWord(text, sourceLang = 'en', targetLang = 'ar', 
   if (translation) {
     const result = { translation, match };
     translationCache[cacheKey] = result;
+
+    // Evict oldest 25% when cache exceeds maximum size
+    const keys = Object.keys(translationCache);
+    if (keys.length > MAX_CACHE_SIZE) {
+      const evictCount = Math.floor(MAX_CACHE_SIZE * 0.25);
+      for (let i = 0; i < evictCount; i++) {
+        delete translationCache[keys[i]];
+      }
+    }
+
     saveCache();
     return result;
   }

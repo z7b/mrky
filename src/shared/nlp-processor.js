@@ -41,16 +41,30 @@ const STOP_WORDS = new Set([
   'up', 'out', 'about', 'over', 'down',
   'there', 'here', 'now', 'then',
 ]);
+// NLP result cache — avoids re-running compromise.js on repeated/similar sentences
+const nlpCache = new Map();
+const NLP_CACHE_MAX = 100;
 
 /**
  * Analyze a sentence and return an array of tagged word objects.
  * Each object includes the original word, its POS category, and whether it's a stop word.
+ * Results are cached by sentence text for instant retrieval on repeated captions.
  *
  * @param {string} sentence - The English sentence to analyze
  * @param {Set<string>} [knownWords=new Set()] - Set of words the user already knows
  * @returns {Array<{word: string, pos: string, posInfo: Object, isStop: boolean, isKnown: boolean}>}
  */
 export function analyzeText(sentence, knownWords = new Set()) {
+  // Check cache first — if NLP result exists, only refresh known-word flags
+  const cached = nlpCache.get(sentence);
+  if (cached) {
+    // Update isKnown flags (knownWords set may have changed since cache entry was created)
+    return cached.map(item => ({
+      ...item,
+      isKnown: knownWords.has(item.word.toLowerCase()),
+    }));
+  }
+
   const doc = nlp(sentence);
   const terms = doc.termList();
   const results = [];
@@ -89,6 +103,14 @@ export function analyzeText(sentence, knownWords = new Set()) {
       isKnown,
     });
   }
+
+  // Store in cache for instant retrieval on repeated sentences
+  if (nlpCache.size >= NLP_CACHE_MAX) {
+    // Evict oldest entry (first key in Map iteration order)
+    const oldestKey = nlpCache.keys().next().value;
+    nlpCache.delete(oldestKey);
+  }
+  nlpCache.set(sentence, results);
 
   return results;
 }

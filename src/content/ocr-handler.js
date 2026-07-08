@@ -31,6 +31,10 @@ async function runTesseractOCR(imageSource) {
       chrome.runtime.sendMessage(
         { type: 'RUN_OCR', payload: { image: imageSource } },
         (response) => {
+          if (chrome.runtime.lastError) {
+            resolve({ text: '', words: [] });
+            return;
+          }
           resolve(response || { text: '', words: [] });
         }
       );
@@ -118,8 +122,10 @@ function enterOCRMode() {
   ocrOverlay = document.createElement('div');
   ocrOverlay.id = 'mrky-ocr-overlay';
   ocrOverlay.className = 'mrky-ocr-overlay';
+  ocrOverlay.setAttribute('role', 'dialog');
+  ocrOverlay.setAttribute('aria-label', 'وضع استخراج النص من الصور');
   ocrOverlay.innerHTML = `
-    <div class="mrky-ocr-hint">
+    <div class="mrky-ocr-hint" role="alert">
       <span>📷</span>
       <span>ارسم مربع على النص لاستخراجه وترجمته</span>
       <span class="mrky-ocr-hint-key">ESC للإلغاء</span>
@@ -243,12 +249,20 @@ async function showOCRResultPanel(text, analyzed) {
   panel.className = 'mrky-ocr-panel mrky-tooltip mrky-tooltip-visible';
   panel.dataset.mrkyProcessed = 'true'; // Force light-theme CSS overrides for text colors
 
-  let coloredHTML = '';
+  // Security: Build colored words safely using DOM methods to prevent XSS from OCR output
+  const coloredFragment = document.createDocumentFragment();
   for (const item of analyzed) {
-    const stopClass = item.isStop ? ' mrky-stop' : '';
-    const knownClass = item.isKnown ? ' mrky-known' : '';
-    const classes = `mrky-word ${item.posInfo.class}${stopClass}${knownClass}`;
-    coloredHTML += `${item.pre}<span class="${classes}" style="color:${item.posInfo.color}">${item.word}</span>${item.post}`;
+    if (item.pre) {
+      coloredFragment.appendChild(document.createTextNode(item.pre));
+    }
+    const span = document.createElement('span');
+    span.className = `mrky-word ${item.posInfo.class}${item.isStop ? ' mrky-stop' : ''}${item.isKnown ? ' mrky-known' : ''}`;
+    span.style.color = item.posInfo.color;
+    span.textContent = item.word;
+    coloredFragment.appendChild(span);
+    if (item.post) {
+      coloredFragment.appendChild(document.createTextNode(item.post));
+    }
   }
 
   panel.innerHTML = `
@@ -261,7 +275,6 @@ async function showOCRResultPanel(text, analyzed) {
         </div>
       </div>
       <div class="mrky-tooltip-word" style="direction: ltr; text-align: left; font-size: 17px; margin-bottom: 15px; line-height: 1.5; max-height: 150px; overflow-y: auto;">
-        ${coloredHTML || text}
       </div>
       <div class="mrky-tooltip-translation mrky-ocr-result-translation" style="color: #4A5568; margin-bottom: 15px; font-size: 16px; font-weight: 500;">
         <span class="mrky-tooltip-loading" style="color: #718096; font-style: italic;">جاري الترجمة...</span>
@@ -271,6 +284,14 @@ async function showOCRResultPanel(text, analyzed) {
       </div>
     </div>
   `;
+
+  // Insert the safely-built colored words (or fallback plain text) into the word container
+  const wordContainer = panel.querySelector('.mrky-tooltip-word');
+  if (coloredFragment.childNodes.length > 0) {
+    wordContainer.appendChild(coloredFragment);
+  } else {
+    wordContainer.textContent = text;
+  }
 
   panel.querySelector('.mrky-ocr-close').addEventListener('click', () => panel.remove());
 
@@ -345,6 +366,7 @@ function enterImageScanMode() {
   const hint = document.createElement('div');
   hint.id = 'mrky-image-scan-hint';
   hint.className = 'mrky-image-scan-hint';
+  hint.setAttribute('role', 'alert');
   hint.innerHTML = `
     <span>🔍</span>
     <span>وضع مسح الصور — انقر على أي صورة لاستخراج النص منها</span>
@@ -594,6 +616,10 @@ function captureScreenshot() {
   return new Promise((resolve) => {
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
         resolve(response?.screenshot || null);
       });
     } else {
@@ -660,6 +686,7 @@ function cropImage(dataUrl, rect) {
       );
       resolve(canvas.toDataURL('image/png'));
     };
+    img.onerror = () => resolve(null); // Prevent Promise leak on bad data URLs
     img.src = dataUrl;
   });
 }

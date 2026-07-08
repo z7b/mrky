@@ -19,7 +19,7 @@
     "https://api.mymemory.translated.net/*"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';"
+    "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https:; img-src 'self' data: blob:; media-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline';"
   },
   "background": {
     "service_worker": "service-worker.js"

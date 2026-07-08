@@ -43,7 +43,7 @@ dropZone.addEventListener('drop', (e) => {
   if (file && file.type === 'application/pdf') {
     loadPdfFile(file);
   } else {
-    alert('يرجى سحب وإفلات ملف PDF صالح فقط.');
+    showPdfToast('يرجى سحب وإفلات ملف PDF صالح فقط.', 'error');
   }
 });
 
@@ -88,7 +88,7 @@ function loadPdfFile(file) {
       renderPage(pageNum);
     }).catch(err => {
       console.error('[Mrky PDF] Load error:', err);
-      alert('حدث خطأ أثناء تحميل ملف الـ PDF. تأكد من أن الملف غير محمي بكلمة مرور.');
+      showPdfToast('حدث خطأ أثناء تحميل ملف الـ PDF. تأكد من أن الملف غير محمي بكلمة مرور.', 'error');
     });
   };
   reader.readAsArrayBuffer(file);
@@ -165,7 +165,7 @@ document.getElementById('btn-prev').addEventListener('click', () => {
 });
 
 document.getElementById('btn-next').addEventListener('click', () => {
-  if (pageNum >= pdfDoc.numPages) return;
+  if (!pdfDoc || pageNum >= pdfDoc.numPages) return;
   pageNum++;
   queueRenderPage(pageNum);
 });
@@ -209,6 +209,7 @@ function showLocalFileTip(url) {
   tipDiv.style.marginTop = '16px';
   tipDiv.style.width = '100%';
   
+  // Security: Build HTML with a placeholder for fileName, then insert safely via textContent
   tipDiv.innerHTML = `
     <div style="background: rgba(229, 57, 53, 0.08); border: 1.5px dashed var(--mrky-red); border-radius: var(--mrky-radius-md); padding: 24px; max-width: 480px; margin: 12px auto 0; text-align: center;">
       <span style="font-size: 32px; display: block; margin-bottom: 10px;">🔒 حماية المتصفح</span>
@@ -218,12 +219,22 @@ function showLocalFileTip(url) {
       </p>
       <div style="background: var(--mrky-bg-inset); padding: 12px 16px; border-radius: var(--mrky-radius-sm); text-align: right; font-size: 13px; color: var(--mrky-text-secondary); margin-bottom: 18px; line-height: 1.8;">
         <strong>لفتح وقراءة الملف الآن:</strong><br>
-        1. اسحب ملف <strong style="color: var(--mrky-red);">${fileName}</strong> من مجلد التنزيلات وأفلته هنا.<br>
+        1. اسحب ملف <strong style="color: var(--mrky-red);" class="local-file-name"></strong> من مجلد التنزيلات وأفلته هنا.<br>
         2. أو اضغط على الزر أدناه وحدده يدوياً.
       </div>
-      <button class="btn-primary btn-sm" onclick="document.getElementById('file-input').click()">تحديد الملف يدوياً 📂</button>
+      <button class="btn-primary btn-sm local-file-select-btn">تحديد الملف يدوياً 📂</button>
     </div>
   `;
+
+  // Security: Insert fileName safely via textContent (prevents XSS from crafted filenames)
+  const fileNameEl = tipDiv.querySelector('.local-file-name');
+  if (fileNameEl) fileNameEl.textContent = fileName;
+
+  // Security: Use addEventListener instead of inline onclick (CSP-safe)
+  const selectBtn = tipDiv.querySelector('.local-file-select-btn');
+  if (selectBtn) {
+    selectBtn.addEventListener('click', () => document.getElementById('file-input').click());
+  }
   
   // Hide standard drop zone descriptions and append our customized security tip
   const standardContent = dropZone.querySelector('.drop-zone-content');
@@ -264,7 +275,7 @@ function loadWebPdf(url) {
     pdfViewer.innerHTML = '';
     viewerContainer.classList.add('hidden');
     dropZone.classList.remove('hidden');
-    alert('فشل تحميل ملف PDF من الإنترنت. تأكد من أن الرابط مباشر ويسمح بالتحميل: ' + err.message);
+    showPdfToast('فشل تحميل ملف PDF من الإنترنت. تأكد من أن الرابط مباشر ويسمح بالتحميل.', 'error');
   });
 }
 
@@ -277,5 +288,34 @@ if (fileParam) {
     showLocalFileTip(cleanUrl);
   } else if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')) {
     loadWebPdf(cleanUrl);
+  } else {
+    // Security: Block unsupported URL schemes (e.g. javascript:, data:)
+    console.warn('[Mrky PDF] Blocked unsupported URL scheme:', cleanUrl.split(':')[0]);
   }
+}
+
+/**
+ * Non-blocking toast notification (replaces blocking alert() for better UX and accessibility).
+ * @param {string} message
+ * @param {'error'|'success'|'info'} type
+ */
+function showPdfToast(message, type = 'info') {
+  const toast = document.createElement('div');
+  toast.setAttribute('role', 'alert');
+  toast.setAttribute('aria-live', 'assertive');
+  toast.textContent = message;
+  toast.style.cssText = `
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: ${type === 'error' ? 'rgba(239,68,68,0.95)' : 'rgba(16,185,129,0.95)'};
+    color: #fff; padding: 14px 28px; border-radius: 12px; font-size: 14px;
+    font-weight: 500; z-index: 2147483647; max-width: 500px; text-align: center;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3); backdrop-filter: blur(8px);
+    animation: mrkyToastIn 0.3s ease; direction: rtl;
+  `;
+  document.body.appendChild(toast);
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s ease';
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
 }

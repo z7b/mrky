@@ -9,6 +9,14 @@ import * as db from '../shared/db.js';
 
 const TRANSLATION_API = 'https://api.mymemory.translated.net/get';
 
+// Security: Only these db methods can be invoked via the DB_PROXY message.
+// Prevents arbitrary method execution from content scripts or compromised pages.
+const ALLOWED_DB_METHODS = [
+  'addCard', 'getAllCards', 'getDueCards', 'reviewCard', 'deleteCard',
+  'getCardCount', 'markAsKnown', 'isKnown', 'getKnownWordsSet',
+  'getKnownWordCount', 'getSetting', 'setSetting',
+];
+
 // Listen for messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
@@ -47,6 +55,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function handleDbProxy(method, args, sendResponse) {
   try {
+    // Security: Reject any method not in the whitelist
+    if (!ALLOWED_DB_METHODS.includes(method)) {
+      console.warn('[Mrky DB Proxy] Blocked disallowed method:', method);
+      sendResponse({ error: `Method not allowed: ${method}` });
+      return;
+    }
     let result = await db[method](...args);
     // Convert Set to Array for JSON serialization
     if (method === 'getKnownWordsSet' && result instanceof Set) {
@@ -272,6 +286,12 @@ async function handleGetAudio(payload = {}, sendResponse) {
     return;
   }
 
+  // Security: Validate word format — allow only letters, hyphens, apostrophes, spaces
+  if (!/^[a-z '-]+$/i.test(word) || word.length > 100) {
+    sendResponse({ error: 'Invalid word format' });
+    return;
+  }
+
   if (audioCache.has(word)) {
     sendResponse({ audioUrl: audioCache.get(word) });
     return;
@@ -316,15 +336,18 @@ async function handleGetAudio(payload = {}, sendResponse) {
 
     // ── SOURCE 2: Google Dictionary (Real human recordings hosted by Google) ──
     if (!audioBuffer) {
+      // Security: Encode the word to prevent path traversal in URLs
+      const safeWord = encodeURIComponent(word);
       const googleDictUrls = [
-        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${word}--_us_1.mp3`,
-        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${word}--_gb_1.mp3`,
-        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${word}--_us_2.mp3`,
+        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_us_1.mp3`,
+        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_gb_1.mp3`,
+        `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_us_2.mp3`,
       ];
       for (const url of googleDictUrls) {
         try {
           const audioRes = await fetch(url);
-          if (audioRes.ok) {
+          // Security: Validate Content-Type to prevent MITM injection of non-audio data
+          if (audioRes.ok && (audioRes.headers.get('content-type') || '').includes('audio')) {
             audioBuffer = await audioRes.arrayBuffer();
             console.log(`[Mrky Audio] ✅ Fetched human audio for "${word}" from Google Dictionary`);
             break;
@@ -413,9 +436,10 @@ async function setupOffscreenDocument() {
       if (!err.message.includes('Only a single offscreen')) {
         console.warn('[Mrky BG] createDocument error:', err);
       }
+    }).finally(() => {
+      creatingOffscreen = null;
     });
     await creatingOffscreen;
-    creatingOffscreen = null;
   }
 }
 

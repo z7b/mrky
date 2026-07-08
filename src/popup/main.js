@@ -177,16 +177,41 @@ function renderRecentWords(cards) {
     const color = posColors[card.pos] || posColors.other;
     const textColor = card.pos === 'verb' ? '#0F0F1A' : '#fff';
 
-    item.innerHTML = `
-      <div class="word-meta">
-        <div class="word-eng-wrapper">
-          <button class="mrky-btn-speak-popup" title="استمع للكلمة" data-word="${card.word}">🔊</button>
-          <span class="word-eng">${card.word}</span>
-        </div>
-        <span class="word-pos" style="background:${color}; color:${textColor}">${card.pos}</span>
-      </div>
-      <span class="word-arb">${card.translation}</span>
-    `;
+    // Security: Build DOM safely to prevent XSS from user-stored data
+    const wordMeta = document.createElement('div');
+    wordMeta.className = 'word-meta';
+
+    const wordEngWrapper = document.createElement('div');
+    wordEngWrapper.className = 'word-eng-wrapper';
+
+    const speakBtn = document.createElement('button');
+    speakBtn.className = 'mrky-btn-speak-popup';
+    speakBtn.title = 'استمع للكلمة';
+    speakBtn.setAttribute('data-word', card.word);
+    speakBtn.textContent = '🔊';
+
+    const wordEng = document.createElement('span');
+    wordEng.className = 'word-eng';
+    wordEng.textContent = card.word;
+
+    wordEngWrapper.appendChild(speakBtn);
+    wordEngWrapper.appendChild(wordEng);
+
+    const wordPos = document.createElement('span');
+    wordPos.className = 'word-pos';
+    wordPos.style.background = color;
+    wordPos.style.color = textColor;
+    wordPos.textContent = card.pos;
+
+    wordMeta.appendChild(wordEngWrapper);
+    wordMeta.appendChild(wordPos);
+
+    const wordArb = document.createElement('span');
+    wordArb.className = 'word-arb';
+    wordArb.textContent = card.translation;
+
+    item.appendChild(wordMeta);
+    item.appendChild(wordArb);
 
     container.appendChild(item);
   });

@@ -82,6 +82,12 @@ async function playWordAudio(word, sendResponse) {
     return;
   }
 
+  // Security: Validate word format — allow only letters, hyphens, apostrophes, spaces
+  if (!/^[a-z '-]+$/i.test(cleanWord) || cleanWord.length > 100) {
+    sendResponse({ error: 'Invalid word format' });
+    return;
+  }
+
   // Stop any currently playing audio
   if (currentAudio) {
     try {
@@ -136,10 +142,12 @@ async function playWordAudio(word, sendResponse) {
 
       // ── SOURCE 2: Google Dictionary (Real human recordings hosted by Google) ──
       if (!audioUrl) {
+        // Security: Encode the word to prevent path traversal in URLs
+        const safeWord = encodeURIComponent(cleanWord);
         const googleDictUrls = [
-          `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${cleanWord}--_us_1.mp3`,
-          `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${cleanWord}--_gb_1.mp3`,
-          `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${cleanWord}--_us_2.mp3`,
+          `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_us_1.mp3`,
+          `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_gb_1.mp3`,
+          `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_us_2.mp3`,
         ];
         for (const url of googleDictUrls) {
           try {

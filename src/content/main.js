@@ -33,6 +33,8 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
       startVideoObserver('youtube');
 
       // Re-initialize observer on YouTube SPA navigation
+      // Use <title> observation instead of document.body to avoid CPU waste
+      // YouTube updates the title on every navigation
       if (!window.__mrkyYTObserver) {
         let lastUrl = location.href;
         window.__mrkyYTObserver = new MutationObserver(() => {
@@ -44,7 +46,13 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
             }
           }
         });
-        window.__mrkyYTObserver.observe(document.body, { childList: true, subtree: true });
+        // Observe <title> element — lightweight SPA navigation detection
+        const titleEl = document.querySelector('title');
+        const observeTarget = titleEl || document.body;
+        window.__mrkyYTObserver.observe(observeTarget, {
+          childList: true,
+          subtree: !titleEl, // Only use subtree if falling back to body
+        });
       }
 
     } else if (hostname.includes('netflix.com')) {
