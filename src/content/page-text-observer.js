@@ -85,6 +85,15 @@ function processPageText() {
           continue;
         }
 
+        // Skip text that is predominantly non-English (e.g. Arabic, Chinese, etc.)
+        // Only process paragraphs where at least 40% of characters are Latin
+        const strippedText = fullText.replace(/\s/g, '');
+        const latinCount = (fullText.match(/[a-zA-Z]/g) || []).length;
+        if (strippedText.length > 10 && latinCount / strippedText.length < 0.4) {
+          el.dataset.mrkyProcessed = 'true';
+          continue;
+        }
+
         // Analyze the text
         const analyzed = analyzeText(fullText, knownWords);
         

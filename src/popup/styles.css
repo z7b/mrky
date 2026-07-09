@@ -599,3 +599,303 @@ body {
   from { opacity: 0; }
   to { opacity: 1; }
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* ─── Toggle Actions Row ─── */
+.toggle-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-settings-gear {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--mrky-border);
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.25s ease;
+  padding: 0;
+}
+
+.btn-settings-gear:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--mrky-border-hover);
+  transform: rotate(60deg);
+}
+
+.btn-settings-gear.active {
+  background: rgba(229, 57, 53, 0.15);
+  border-color: rgba(229, 57, 53, 0.4);
+}
+
+/* ─── Settings Panel ─── */
+.settings-panel {
+  animation: settingsSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes settingsSlideIn {
+  from { opacity: 0; transform: translateY(-8px); max-height: 0; }
+  to { opacity: 1; transform: translateY(0); max-height: 500px; }
+}
+
+.settings-card {
+  background: var(--mrky-bg-card);
+  border: 1px solid var(--mrky-border);
+  border-radius: var(--mrky-radius-md);
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--mrky-border);
+}
+
+.settings-title-icon {
+  font-size: 16px;
+}
+
+.settings-header h3 {
+  font-size: 14px;
+  font-weight: 700;
+  flex: 1;
+}
+
+.btn-close-settings {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--mrky-border);
+  color: var(--mrky-text-secondary);
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.2s ease;
+  padding: 0;
+  font-family: var(--mrky-font);
+}
+
+.btn-close-settings:hover {
+  background: rgba(229, 57, 53, 0.2);
+  color: #FF6B6B;
+  border-color: rgba(229, 57, 53, 0.4);
+}
+
+/* ─── Mode Options (Radio Cards) ─── */
+.settings-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-option {
+  display: block;
+  cursor: pointer;
+}
+
+.mode-option input[type="radio"] {
+  display: none;
+}
+
+.mode-option-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--mrky-radius-sm);
+  border: 1px solid var(--mrky-border);
+  background: var(--mrky-bg-elevated);
+  transition: all 0.2s ease;
+}
+
+.mode-option:hover .mode-option-content {
+  border-color: var(--mrky-border-hover);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mode-option input[type="radio"]:checked + .mode-option-content {
+  border-color: rgba(229, 57, 53, 0.5);
+  background: rgba(229, 57, 53, 0.08);
+  box-shadow: 0 0 0 1px rgba(229, 57, 53, 0.15);
+}
+
+.mode-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.mode-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--mrky-text);
+  margin-bottom: 1px;
+}
+
+.mode-desc {
+  display: block;
+  font-size: 10px;
+  color: var(--mrky-text-tertiary);
+  line-height: 1.3;
+}
+
+/* ─── Custom Sites Input ─── */
+.custom-sites-area {
+  margin-top: 12px;
+  animation: fadeIn 0.25s ease;
+}
+
+.custom-sites-input-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.input-site {
+  flex: 1;
+  background: var(--mrky-bg-inset);
+  border: 1px solid var(--mrky-border);
+  border-radius: var(--mrky-radius-sm);
+  color: var(--mrky-text);
+  font-size: 12px;
+  font-family: 'Inter', monospace;
+  padding: 8px 10px;
+  outline: none;
+  transition: border-color 0.2s ease;
+}
+
+.input-site::placeholder {
+  color: var(--mrky-text-tertiary);
+  font-family: var(--mrky-font);
+  direction: rtl;
+}
+
+.input-site:focus {
+  border-color: rgba(229, 57, 53, 0.5);
+}
+
+.btn-add-site {
+  background: var(--mrky-red);
+  color: #fff;
+  border: none;
+  border-radius: var(--mrky-radius-sm);
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mrky-font);
+}
+
+.btn-add-site:hover {
+  background: var(--mrky-red-hover);
+  transform: scale(1.05);
+}
+
+/* ─── Custom Sites List ─── */
+.custom-sites-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.custom-sites-list::-webkit-scrollbar {
+  width: 3px;
+}
+
+.custom-sites-list::-webkit-scrollbar-thumb {
+  background: var(--mrky-border);
+  border-radius: 2px;
+}
+
+.site-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--mrky-bg-elevated);
+  border: 1px solid var(--mrky-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  animation: fadeIn 0.2s ease;
+}
+
+.site-item-domain {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mrky-text);
+  font-family: 'Inter', monospace;
+  direction: ltr;
+  text-align: left;
+}
+
+.btn-remove-site {
+  background: none;
+  border: none;
+  color: var(--mrky-text-tertiary);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.btn-remove-site:hover {
+  color: #FF6B6B;
+  background: rgba(229, 57, 53, 0.15);
+}
+
+.custom-sites-empty {
+  text-align: center;
+  padding: 10px;
+  font-size: 11px;
+  color: var(--mrky-text-tertiary);
+  font-style: italic;
+}
+
+/* ─── English Note ─── */
+.english-note {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: var(--mrky-radius-sm);
+  animation: fadeIn 0.25s ease;
+}
+
+.english-note span {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.english-note p {
+  font-size: 11px;
+  color: var(--mrky-text-secondary);
+  line-height: 1.5;
+}

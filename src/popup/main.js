@@ -109,12 +109,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  function updateToggleUI(enabled) {
+  // Status label text based on site mode
+  const statusMessages = {
+    all: 'الإضافة تعمل على جميع المواقع',
+    custom: 'الإضافة تعمل على مواقع محددة',
+    english: 'الإضافة تعمل على المواقع الإنجليزية',
+  };
+
+  function updateToggleUI(enabled, siteMode) {
+    const modeText = statusMessages[siteMode] || statusMessages.all;
     if (enabled) {
       if (toggleBox) toggleBox.classList.remove('disabled');
       if (btnToggle) btnToggle.classList.remove('disabled-btn');
       if (statusDot) statusDot.textContent = '🟢';
-      if (statusLabel) statusLabel.textContent = 'الإضافة تعمل على جميع المواقع';
+      if (statusLabel) statusLabel.textContent = modeText;
       if (toggleIcon) toggleIcon.textContent = '⚡';
       if (toggleText) toggleText.textContent = 'مفعل';
       if (btnTriggerOcr) btnTriggerOcr.disabled = false;
@@ -132,20 +140,163 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Load initial toggle state
-  chrome.storage.local.get(['mrkyEnabled'], (res) => {
-    updateToggleUI(res.mrkyEnabled !== false);
+  chrome.storage.local.get(['mrkyEnabled', 'mrkySiteMode'], (res) => {
+    const mode = res.mrkySiteMode || 'all';
+    updateToggleUI(res.mrkyEnabled !== false, mode);
   });
 
   // Toggle click event
   if (btnToggle) {
     btnToggle.addEventListener('click', () => {
-      chrome.storage.local.get(['mrkyEnabled'], (res) => {
+      chrome.storage.local.get(['mrkyEnabled', 'mrkySiteMode'], (res) => {
         const current = res.mrkyEnabled !== false;
         const nextState = !current;
+        const mode = res.mrkySiteMode || 'all';
         chrome.storage.local.set({ mrkyEnabled: nextState }, () => {
-          updateToggleUI(nextState);
+          updateToggleUI(nextState, mode);
         });
       });
+    });
+  }
+
+  // ─── Settings Panel Logic ───
+  const btnOpenSettings = document.getElementById('btn-open-settings');
+  const btnCloseSettings = document.getElementById('btn-close-settings');
+  const settingsPanel = document.getElementById('settings-panel');
+  const customSitesArea = document.getElementById('custom-sites-area');
+  const englishNote = document.getElementById('english-note');
+  const inputCustomSite = document.getElementById('input-custom-site');
+  const btnAddSite = document.getElementById('btn-add-site');
+  const customSitesList = document.getElementById('custom-sites-list');
+  const modeRadios = document.querySelectorAll('input[name="siteMode"]');
+
+  // Open/Close settings
+  if (btnOpenSettings) {
+    btnOpenSettings.addEventListener('click', () => {
+      const isOpen = settingsPanel.style.display !== 'none';
+      settingsPanel.style.display = isOpen ? 'none' : 'block';
+      btnOpenSettings.classList.toggle('active', !isOpen);
+    });
+  }
+
+  if (btnCloseSettings) {
+    btnCloseSettings.addEventListener('click', () => {
+      settingsPanel.style.display = 'none';
+      if (btnOpenSettings) btnOpenSettings.classList.remove('active');
+    });
+  }
+
+  // Load saved settings
+  chrome.storage.local.get(['mrkySiteMode', 'mrkyCustomSites'], (res) => {
+    const mode = res.mrkySiteMode || 'all';
+    const sites = res.mrkyCustomSites || [];
+
+    // Set selected radio
+    const radio = document.querySelector(`input[name="siteMode"][value="${mode}"]`);
+    if (radio) radio.checked = true;
+
+    // Show/hide conditional areas
+    updateSettingsUI(mode);
+    renderCustomSites(sites);
+  });
+
+  // Mode change handler
+  modeRadios.forEach(radio => {
+    radio.addEventListener('change', (e) => {
+      const mode = e.target.value;
+      chrome.storage.local.set({ mrkySiteMode: mode }, () => {
+        updateSettingsUI(mode);
+        // Update status label
+        chrome.storage.local.get(['mrkyEnabled'], (res) => {
+          updateToggleUI(res.mrkyEnabled !== false, mode);
+        });
+      });
+    });
+  });
+
+  function updateSettingsUI(mode) {
+    if (customSitesArea) customSitesArea.style.display = mode === 'custom' ? 'block' : 'none';
+    if (englishNote) englishNote.style.display = mode === 'english' ? 'flex' : 'none';
+  }
+
+  // Add custom site
+  function addCustomSite() {
+    const raw = inputCustomSite.value.trim();
+    if (!raw) return;
+
+    // Normalize: extract hostname from URL or plain domain
+    let domain = raw;
+    try {
+      if (raw.includes('://')) {
+        domain = new URL(raw).hostname;
+      } else if (raw.includes('/')) {
+        domain = new URL('https://' + raw).hostname;
+      }
+    } catch {
+      // Use as-is
+    }
+    domain = domain.replace(/^www\./, '').toLowerCase();
+
+    if (!domain) return;
+
+    chrome.storage.local.get(['mrkyCustomSites'], (res) => {
+      const sites = res.mrkyCustomSites || [];
+      if (sites.includes(domain)) {
+        inputCustomSite.value = '';
+        return; // Already exists
+      }
+      sites.push(domain);
+      chrome.storage.local.set({ mrkyCustomSites: sites }, () => {
+        inputCustomSite.value = '';
+        renderCustomSites(sites);
+      });
+    });
+  }
+
+  if (btnAddSite) btnAddSite.addEventListener('click', addCustomSite);
+  if (inputCustomSite) {
+    inputCustomSite.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') addCustomSite();
+    });
+  }
+
+  // Render custom sites list
+  function renderCustomSites(sites) {
+    if (!customSitesList) return;
+    customSitesList.innerHTML = '';
+
+    if (sites.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'custom-sites-empty';
+      empty.textContent = 'لم تضف أي مواقع بعد';
+      customSitesList.appendChild(empty);
+      return;
+    }
+
+    sites.forEach((site) => {
+      const item = document.createElement('div');
+      item.className = 'site-item';
+
+      const domainSpan = document.createElement('span');
+      domainSpan.className = 'site-item-domain';
+      domainSpan.textContent = site;
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'btn-remove-site';
+      removeBtn.textContent = '✕';
+      removeBtn.title = 'حذف';
+      removeBtn.addEventListener('click', () => {
+        chrome.storage.local.get(['mrkyCustomSites'], (res) => {
+          const updated = (res.mrkyCustomSites || []).filter(s => s !== site);
+          chrome.storage.local.set({ mrkyCustomSites: updated }, () => {
+            renderCustomSites(updated);
+          });
+        });
+      });
+
+      item.appendChild(domainSpan);
+      item.appendChild(removeBtn);
+      customSitesList.appendChild(item);
     });
   }
 });

@@ -310,7 +310,8 @@ async function handleGetAudio(payload = {}, sendResponse) {
     for (const ttsUrl of ttsUrls) {
       try {
         const ttsRes = await fetch(ttsUrl);
-        if (ttsRes.ok) {
+        const ttsContentType = (ttsRes.headers.get('content-type') || '');
+        if (ttsRes.ok && (ttsContentType.includes('audio') || ttsContentType.includes('octet-stream'))) {
           audioBuffer = await ttsRes.arrayBuffer();
           console.log(`[Mrky Audio] ✅ Fetched neural TTS for "${word}" from Google Translate`);
           break;
@@ -344,7 +345,8 @@ async function handleGetAudio(payload = {}, sendResponse) {
           if (audioUrl) {
             if (audioUrl.startsWith('//')) audioUrl = 'https:' + audioUrl;
             const audioRes = await fetch(audioUrl);
-            if (audioRes.ok) {
+            const audioContentType = (audioRes.headers.get('content-type') || '');
+            if (audioRes.ok && (audioContentType.includes('audio') || audioContentType.includes('octet-stream'))) {
               audioBuffer = await audioRes.arrayBuffer();
               console.log(`[Mrky Audio] ✅ Fetched human audio for "${word}" from Wiktionary`);
             }

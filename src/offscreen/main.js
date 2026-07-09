@@ -122,7 +122,8 @@ async function playWordAudio(word, sendResponse) {
       for (const url of ttsUrls) {
         try {
           const res = await fetch(url);
-          if (res.ok) {
+          const resContentType = (res.headers.get('content-type') || '');
+          if (res.ok && (resContentType.includes('audio') || resContentType.includes('octet-stream'))) {
             audioUrl = url;
             audioSource = 'neural_google_tts';
             break;

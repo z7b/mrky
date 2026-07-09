@@ -34,10 +34,79 @@
           <span class="toggle-status-dot" id="status-dot">🟢</span>
           <span class="toggle-status-label" id="status-label">الإضافة تعمل على جميع المواقع</span>
         </div>
-        <button id="btn-toggle-enable" class="btn-toggle-state enabled" title="إيقاف أو تشغيل أداة Mrky">
-          <span id="btn-toggle-icon">⚡</span>
-          <span id="btn-toggle-text">مفعل</span>
-        </button>
+        <div class="toggle-actions-row">
+          <button id="btn-toggle-enable" class="btn-toggle-state enabled" title="إيقاف أو تشغيل أداة Mrky">
+            <span id="btn-toggle-icon">⚡</span>
+            <span id="btn-toggle-text">مفعل</span>
+          </button>
+          <button id="btn-open-settings" class="btn-settings-gear" title="إعدادات المواقع">
+            ⚙️
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Site Governance Settings Panel (hidden by default) -->
+    <section class="settings-panel" id="settings-panel" style="display: none;">
+      <div class="settings-card">
+        <div class="settings-header">
+          <span class="settings-title-icon">🌐</span>
+          <h3>إعدادات المواقع</h3>
+          <button id="btn-close-settings" class="btn-close-settings" title="إغلاق">✕</button>
+        </div>
+
+        <!-- Site Mode Selector -->
+        <div class="settings-mode-group">
+          <label class="mode-option" id="mode-all">
+            <input type="radio" name="siteMode" value="all" checked>
+            <div class="mode-option-content">
+              <span class="mode-icon">🌍</span>
+              <div>
+                <span class="mode-label">جميع المواقع</span>
+                <span class="mode-desc">تعمل على كل المواقع بدون قيود</span>
+              </div>
+            </div>
+          </label>
+
+          <label class="mode-option" id="mode-custom">
+            <input type="radio" name="siteMode" value="custom">
+            <div class="mode-option-content">
+              <span class="mode-icon">📌</span>
+              <div>
+                <span class="mode-label">مواقع محددة فقط</span>
+                <span class="mode-desc">تعمل فقط على المواقع التي تضيفها</span>
+              </div>
+            </div>
+          </label>
+
+          <label class="mode-option" id="mode-english">
+            <input type="radio" name="siteMode" value="english">
+            <div class="mode-option-content">
+              <span class="mode-icon">🔤</span>
+              <div>
+                <span class="mode-label">المواقع الإنجليزية فقط</span>
+                <span class="mode-desc">تكتشف تلقائياً المواقع ذات المحتوى الإنجليزي</span>
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <!-- Custom Sites Input (visible only in 'custom' mode) -->
+        <div class="custom-sites-area" id="custom-sites-area" style="display: none;">
+          <div class="custom-sites-input-row">
+            <input type="text" id="input-custom-site" class="input-site" placeholder="أدخل رابط الموقع (مثال: youtube.com)" dir="ltr">
+            <button id="btn-add-site" class="btn-add-site" title="إضافة">+</button>
+          </div>
+          <div class="custom-sites-list" id="custom-sites-list">
+            <!-- Sites will be rendered here -->
+          </div>
+        </div>
+
+        <!-- English-only note -->
+        <div class="english-note" id="english-note" style="display: none;">
+          <span>💡</span>
+          <p>الإضافة ستفحص لغة الصفحة تلقائياً وتعمل فقط على المحتوى الإنجليزي. النصوص العربية والصينية وغيرها سيتم تجاهلها.</p>
+        </div>
       </div>
     </section>
 
