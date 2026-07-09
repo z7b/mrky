@@ -287,10 +287,29 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
     const shortContext = extractContext(word, sentence, 120);
     let result = await translateViaBackground(word, shortContext);
 
+    if (result && result.error === 'context_invalidated') {
+      if (!currentWord) return;
+      translationEl.innerHTML = '<span style="color: #FF8A8A; font-size: 11px; font-weight: 500;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة</span>';
+      if (addBtn) {
+        addBtn.disabled = true;
+        addBtn.textContent = 'تحديث الصفحة مطلوب';
+      }
+      return;
+    }
+
     // If contextual translation failed, retry with just the word (no context)
     if (!result || !result.translation || result.translation === '⚠ خطأ' || result.translation === '⚠ خطأ في الترجمة') {
       console.warn('[Mrky] Context translation failed, retrying word-only...');
       result = await translateViaBackground(word, '');
+      if (result && result.error === 'context_invalidated') {
+        if (!currentWord) return;
+        translationEl.innerHTML = '<span style="color: #FF8A8A; font-size: 11px; font-weight: 500;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة</span>';
+        if (addBtn) {
+          addBtn.disabled = true;
+          addBtn.textContent = 'تحديث الصفحة مطلوب';
+        }
+        return;
+      }
     }
 
     // Bail out if the tooltip was dismissed while we were awaiting translation
@@ -507,6 +526,12 @@ async function handleTranslateSentence(e) {
   try {
     // Translate the entire sentence via background service worker (leverages LRU cache)
     const res = await translateViaBackground(currentWord.sentence, '');
+    if (res && res.error === 'context_invalidated') {
+      arEl.innerHTML = '<span style="color: #FF8A8A;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة بعد التحديث.</span>';
+      btn.innerHTML = '<span>🔄</span> <span>تحديث الصفحة مطلوب</span>';
+      btn.disabled = true;
+      return;
+    }
     if (res && res.translation && !res.translation.includes('⚠')) {
       arEl.textContent = res.translation;
       btn.innerHTML = '<span>✓</span> <span>تمت الترجمة</span>';

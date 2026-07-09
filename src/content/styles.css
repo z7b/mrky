@@ -37,18 +37,19 @@
   /* Position at bottom of video player when parented inside it */
   left: 0;
   right: 0;
-  bottom: clamp(30px, 5%, 80px);
+  bottom: clamp(75px, 11%, 130px);
   padding: 0 clamp(8px, 2%, 24px);
   /* NO transition — subtitles must appear instantly in sync with audio */
 }
 
 .mrky-overlay-visible {
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: none !important;
 }
 
 /* ─── Color-Coded Sentence ─── */
 .mrky-sentence {
+  pointer-events: auto;
   direction: ltr !important;
   text-align: left !important;
   background: rgba(0, 0, 0, 0.82);

@@ -55,54 +55,61 @@ export async function translateWord(text, sourceLang = 'en', targetLang = 'ar', 
   let translation = null;
   let match = 0;
 
-  // 1. Try MyMemory API
+  // 1. Prioritize Google Translate API (Fastest, reliable, no 429 rate limits)
   try {
-    const query = context ? `${text} (in context: ${context})` : text;
     const params = new URLSearchParams({
-      q: query,
-      langpair: `${sourceLang}|${targetLang}`,
+      client: 'gtx',
+      sl: sourceLang,
+      tl: targetLang,
+      dt: 't',
+      q: text
     });
-
-    const response = await fetch(`${API_BASE}?${params.toString()}`);
+    const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params.toString()}`);
     if (response.ok) {
       const data = await response.json();
-      if (data.responseStatus === 200) {
-        let rawTrans = data.responseData.translatedText;
-        if (context && rawTrans.includes('(')) {
-          const parsed = rawTrans.split('(')[0].trim();
-          if (parsed) rawTrans = parsed;
+      if (data && data[0]) {
+        let fullTranslation = '';
+        for (const segment of data[0]) {
+          if (segment && segment[0]) {
+            fullTranslation += segment[0];
+          }
         }
-        // Verify it didn't just echo the English word
-        if (rawTrans && rawTrans.toLowerCase().trim() !== text.toLowerCase().trim()) {
-          translation = rawTrans;
-          match = data.responseData.match || 1;
+        if (fullTranslation && fullTranslation.toLowerCase().trim() !== text.toLowerCase().trim()) {
+          translation = fullTranslation;
+          match = 1;
         }
       }
     }
   } catch (error) {
-    console.warn('[Mrky] MyMemory fetch failed, trying Google Translate...', error);
+    // Silently fall through to MyMemory backup
   }
 
-  // 2. Try Google Translate Fallback
+  // 2. Try MyMemory API backup
   if (!translation) {
     try {
+      const query = context ? `${text} (in context: ${context})` : text;
       const params = new URLSearchParams({
-        client: 'gtx',
-        sl: sourceLang,
-        tl: targetLang,
-        dt: 't',
-        q: text
+        q: query,
+        langpair: `${sourceLang}|${targetLang}`,
       });
-      const response = await fetch(`https://translate.googleapis.com/translate_a/single?${params.toString()}`);
+
+      const response = await fetch(`${API_BASE}?${params.toString()}`);
       if (response.ok) {
         const data = await response.json();
-        if (data && data[0] && data[0][0] && data[0][0][0]) {
-          translation = data[0][0][0];
-          match = 1;
+        if (data.responseStatus === 200) {
+          let rawTrans = data.responseData.translatedText;
+          if (context && rawTrans.includes('(')) {
+            const parsed = rawTrans.split('(')[0].trim();
+            if (parsed) rawTrans = parsed;
+          }
+          if (rawTrans && rawTrans.toLowerCase().trim() !== text.toLowerCase().trim()) {
+            translation = rawTrans;
+            match = data.responseData.match || 1;
+          }
         }
       }
     } catch (error) {
-      console.error('[Mrky] Google Translate fallback failed:', error);
+      // Failed both APIs
     }
   }
 
@@ -141,16 +148,28 @@ export async function translateViaBackground(text, context = '') {
           { type: 'TRANSLATE', payload: { text, context } },
           (response) => {
             if (chrome.runtime.lastError) {
-              console.warn('[Mrky] Context invalidated, using direct translation...');
-              translateWord(text, 'en', 'ar', context).then(resolve);
+              const errMsg = chrome.runtime.lastError.message || '';
+              if (errMsg.includes('context invalidated') || errMsg.includes('invoking')) {
+                console.warn('[Mrky] Extension context invalidated. Please refresh the page.');
+                resolve({ translation: text, match: 0, error: 'context_invalidated' });
+              } else {
+                console.warn('[Mrky] Translation message failed:', errMsg);
+                translateWord(text, 'en', 'ar', context).then(resolve);
+              }
             } else {
               resolve(response || { translation: text, match: 0 });
             }
           }
         );
       } catch (err) {
-        console.warn('[Mrky] Error sending message, using direct translation...', err);
-        translateWord(text, 'en', 'ar', context).then(resolve);
+        const errMsg = err && err.message ? err.message : String(err);
+        if (errMsg.includes('context invalidated') || errMsg.includes('invoking')) {
+          console.warn('[Mrky] Extension context invalidated. Please refresh the page.');
+          resolve({ translation: text, match: 0, error: 'context_invalidated' });
+        } else {
+          console.warn('[Mrky] Error sending message, using direct translation...', err);
+          translateWord(text, 'en', 'ar', context).then(resolve);
+        }
       }
     } else {
       // Fallback for development/testing outside extension context

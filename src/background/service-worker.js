@@ -73,6 +73,9 @@ async function handleDbProxy(method, args, sendResponse) {
   }
 }
 
+// Circuit breaker to avoid spamming MyMemory when rate-limited (HTTP 429)
+let myMemoryCooldownUntil = 0;
+
 /**
  * Handle translation requests from content scripts.
  * @param {{text: string, sourceLang?: string, targetLang?: string}} payload
@@ -82,33 +85,23 @@ async function handleTranslation(payload, sendResponse) {
   const { text, context: rawContext = '', sourceLang = 'en', targetLang = 'ar' } = payload;
 
   try {
-    // Truncate context to avoid exceeding API query limits
     const context = rawContext.length > 150 ? rawContext.slice(0, 150) : rawContext;
+    let translation = null;
 
-    // 1. Try MyMemory with context
-    let result = await callTranslationAPI(text, context, sourceLang, targetLang);
-    let translation = result.translation;
-
-    // If it was a rate limit or authorization error (e.g. 429), skip retrying MyMemory entirely!
-    const isHttpError = result.error && (result.status === 429 || result.status === 403);
-
-    if (!isHttpError) {
-      // If MyMemory failed or returned the exact same English word (untranslated)
-      const isUntranslated = translation && translation.toLowerCase().trim() === text.toLowerCase().trim();
-      if (!translation || isUntranslated) {
-        console.warn('[Mrky BG] MyMemory context translation failed/untranslated. Retrying MyMemory word-only...');
-        const wordOnlyResult = await callTranslationAPI(text, '', sourceLang, targetLang);
-        translation = wordOnlyResult.translation;
-      }
+    // 1. Prioritize Google Translate (Fastest, most accurate, no 429 rate limits)
+    const googleResult = await callGoogleTranslateAPI(text, sourceLang, targetLang);
+    if (googleResult && googleResult.toLowerCase().trim() !== text.toLowerCase().trim()) {
+      translation = googleResult;
     }
 
-    // 2. Try Google Translate fallback if MyMemory is rate-limited or fails
-    const isStillUntranslated = translation && translation.toLowerCase().trim() === text.toLowerCase().trim();
-    if (!translation || isStillUntranslated || translation.includes('خطأ')) {
-      console.warn('[Mrky BG] MyMemory translation failed or rate-limited. Falling back to Google Translate...');
-      const googleResult = await callGoogleTranslateAPI(text, sourceLang, targetLang);
-      if (googleResult) {
-        translation = googleResult;
+    // 2. Try MyMemory fallback only if Google Translate failed or returned untranslated text
+    if (!translation && Date.now() >= myMemoryCooldownUntil) {
+      const result = await callTranslationAPI(text, context, sourceLang, targetLang);
+      if (result.status === 429 || result.status === 403) {
+        // Cooldown MyMemory for 5 minutes when rate-limited
+        myMemoryCooldownUntil = Date.now() + 5 * 60 * 1000;
+      } else if (result.translation && result.translation.toLowerCase().trim() !== text.toLowerCase().trim()) {
+        translation = result.translation;
       }
     }
 
@@ -120,13 +113,7 @@ async function handleTranslation(payload, sendResponse) {
     sendResponse({ translation, match: 1 });
   } catch (error) {
     console.error('[Mrky BG] Translation error:', error);
-    // Fallback directly to Google Translate on error
-    try {
-      const googleResult = await callGoogleTranslateAPI(text, sourceLang, targetLang);
-      sendResponse({ translation: googleResult || text, match: 1 });
-    } catch (innerError) {
-      sendResponse({ translation: text, match: 0 });
-    }
+    sendResponse({ translation: text, match: 0 });
   }
 }
 
@@ -147,12 +134,17 @@ async function callGoogleTranslateAPI(text, sourceLang, targetLang) {
     if (!response.ok) return null;
     
     const data = await response.json();
-    if (data && data[0] && data[0][0] && data[0][0][0]) {
-      return data[0][0][0];
+    if (data && data[0]) {
+      let translation = '';
+      for (const segment of data[0]) {
+        if (segment && segment[0]) {
+          translation += segment[0];
+        }
+      }
+      return translation || null;
     }
     return null;
   } catch (err) {
-    console.error('[Mrky BG] Google Translate API call failed:', err);
     return null;
   }
 }
@@ -163,6 +155,10 @@ async function callGoogleTranslateAPI(text, sourceLang, targetLang) {
  * @returns {Promise<{translation: string|null, error: boolean, status: number}>}
  */
 async function callTranslationAPI(text, context, sourceLang, targetLang) {
+  if (Date.now() < myMemoryCooldownUntil) {
+    return { translation: null, error: true, status: 429 };
+  }
+
   const query = context ? `${text} (in context: ${context})` : text;
   const params = new URLSearchParams({
     q: query,
@@ -173,14 +169,18 @@ async function callTranslationAPI(text, context, sourceLang, targetLang) {
     const response = await fetch(`${TRANSLATION_API}?${params.toString()}`);
 
     if (!response.ok) {
-      console.warn('[Mrky BG] MyMemory API HTTP error:', response.status, response.statusText);
+      if (response.status === 429 || response.status === 403) {
+        myMemoryCooldownUntil = Date.now() + 5 * 60 * 1000;
+      }
       return { translation: null, error: true, status: response.status };
     }
 
     const data = await response.json();
 
     if (data.responseStatus !== 200) {
-      console.warn('[Mrky BG] MyMemory API returned non-200 status:', data.responseStatus, data.responseDetails);
+      if (data.responseStatus === 429 || data.responseStatus === 403) {
+        myMemoryCooldownUntil = Date.now() + 5 * 60 * 1000;
+      }
       return { translation: null, error: true, status: data.responseStatus };
     }
 
@@ -196,7 +196,6 @@ async function callTranslationAPI(text, context, sourceLang, targetLang) {
 
     return { translation, error: false, status: 200 };
   } catch (err) {
-    console.error('[Mrky BG] MyMemory fetch failed:', err);
     return { translation: null, error: true, status: 0 };
   }
 }

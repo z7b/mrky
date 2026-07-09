@@ -27,42 +27,75 @@ export async function playPronunciation(word, { onStart, onEnd, onError } = {}) 
   if (!word) return;
   const cleanWord = word.trim();
 
+  // Helper to detect context invalidation
+  const isContextInvalidated = (errStr = '') =>
+    errStr.includes('Extension context invalidated') || errStr.includes('context invalidated');
+
   // 1. Try playing via Offscreen Document (Immune to webpage CSP, CORS, and autoplay restrictions)
-  if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+  if (typeof chrome !== 'undefined' && chrome.runtime?.id && chrome.runtime.sendMessage) {
+    let offscreenRes = null;
     try {
       if (onStart) onStart();
-      const res = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'SPEAK_WORD_OFFSCREEN', payload: { word: cleanWord } }, (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ error: chrome.runtime.lastError.message });
-          } else {
-            resolve(response || {});
-          }
-        });
+      offscreenRes = await new Promise((resolve) => {
+        if (!chrome.runtime?.id) {
+          resolve({ error: 'Extension context invalidated.' });
+          return;
+        }
+        try {
+          chrome.runtime.sendMessage({ type: 'SPEAK_WORD_OFFSCREEN', payload: { word: cleanWord } }, (response) => {
+            if (chrome.runtime.lastError) {
+              resolve({ error: chrome.runtime.lastError.message });
+            } else {
+              resolve(response || {});
+            }
+          });
+        } catch (err) {
+          resolve({ error: err.message || String(err) });
+        }
       });
 
-      if (res && res.success) {
+      if (offscreenRes && offscreenRes.success) {
         if (onEnd) onEnd();
         return;
       }
     } catch (err) {
-      console.warn('[Mrky] Offscreen audio request failed, trying GET_AUDIO:', err);
+      offscreenRes = { error: err?.message || String(err) };
+    }
+
+    // If context was invalidated, jump directly to Web Speech API fallback immediately
+    if (offscreenRes?.error && isContextInvalidated(offscreenRes.error)) {
+      console.warn('[Mrky] Extension context invalidated during audio playback. Falling back directly to Web Speech TTS.');
+      fallbackTTS(cleanWord, { onStart: null, onEnd, onError });
+      return;
+    }
+
+    if (offscreenRes?.error) {
+      console.warn('[Mrky] Offscreen audio request failed, trying GET_AUDIO:', offscreenRes.error);
     }
 
     // 2. Secondary fallback: try playing via GET_AUDIO Data URL in DOM
+    let getAudioRes = null;
     try {
-      const res = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_AUDIO', payload: { word: cleanWord } }, (response) => {
-          if (chrome.runtime.lastError) {
-            resolve({ error: chrome.runtime.lastError.message });
-          } else {
-            resolve(response || {});
-          }
-        });
+      getAudioRes = await new Promise((resolve) => {
+        if (!chrome.runtime?.id) {
+          resolve({ error: 'Extension context invalidated.' });
+          return;
+        }
+        try {
+          chrome.runtime.sendMessage({ type: 'GET_AUDIO', payload: { word: cleanWord } }, (response) => {
+            if (chrome.runtime.lastError) {
+              resolve({ error: chrome.runtime.lastError.message });
+            } else {
+              resolve(response || {});
+            }
+          });
+        } catch (err) {
+          resolve({ error: err.message || String(err) });
+        }
       });
 
-      if (res && res.audioUrl) {
-        const audio = new Audio(res.audioUrl);
+      if (getAudioRes && getAudioRes.audioUrl) {
+        const audio = new Audio(getAudioRes.audioUrl);
         if (onEnd) audio.onended = onEnd;
         audio.onerror = (err) => {
           console.warn('[Mrky] Audio DOM playback error, falling back to Web Speech:', err);
@@ -72,7 +105,13 @@ export async function playPronunciation(word, { onStart, onEnd, onError } = {}) 
         return;
       }
     } catch (err) {
-      console.warn('[Mrky] GET_AUDIO failed, falling back to Web Speech:', err);
+      getAudioRes = { error: err?.message || String(err) };
+    }
+
+    if (getAudioRes?.error && isContextInvalidated(getAudioRes.error)) {
+      console.warn('[Mrky] Extension context invalidated during GET_AUDIO. Falling back directly to Web Speech TTS.');
+      fallbackTTS(cleanWord, { onStart: null, onEnd, onError });
+      return;
     }
   }
 

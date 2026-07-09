@@ -340,6 +340,14 @@ async function showOCRResultPanel(text, analyzed) {
   const result = await translateViaBackground(text);
   const transEl = panel.querySelector('.mrky-ocr-result-translation');
   const btn = panel.querySelector('.mrky-btn-add');
+  if (result && result.error === 'context_invalidated') {
+    if (transEl) transEl.innerHTML = '<span style="color: #FF8A8A;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة بعد التحديث.</span>';
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = 'تحديث الصفحة مطلوب';
+    }
+    return;
+  }
   if (transEl && result?.translation && !result.translation.includes('خطأ')) {
     transEl.textContent = result.translation;
     if (btn) {

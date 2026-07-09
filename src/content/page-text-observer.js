@@ -107,49 +107,55 @@ function processPageText() {
             el.appendChild(document.createTextNode(item.pre));
           }
 
-          const wordSpan = document.createElement('span');
-          wordSpan.className = `mrky-word ${item.posInfo.class}`;
-          wordSpan.textContent = item.word;
-          wordSpan.dataset.word = item.word;
-          wordSpan.dataset.pos = item.pos;
-          // Color is applied via CSS class (.mrky-noun, .mrky-verb, etc.)
-          // NOT inline style — so page-context overrides for light backgrounds work correctly
+          const isLatin = /[a-zA-Z]/.test(item.word);
+          if (isLatin) {
+            const wordSpan = document.createElement('span');
+            wordSpan.className = `mrky-word ${item.posInfo.class}`;
+            wordSpan.textContent = item.word;
+            wordSpan.dataset.word = item.word;
+            wordSpan.dataset.pos = item.pos;
+            // Color is applied via CSS class (.mrky-noun, .mrky-verb, etc.)
+            // NOT inline style — so page-context overrides for light backgrounds work correctly
 
-          // Apply visual classes
-          if (item.isStop) wordSpan.classList.add('mrky-stop');
-          if (item.isKnown) wordSpan.classList.add('mrky-known');
+            // Apply visual classes
+            if (item.isStop) wordSpan.classList.add('mrky-stop');
+            if (item.isKnown) wordSpan.classList.add('mrky-known');
 
-          // Interaction (only for non-stop words)
-          if (!item.isStop) {
-            const isPdfMode = window.location.pathname.includes('pdf-reader') || el.closest('.textLayer') !== null;
-            
-            if (isPdfMode) {
-              // PDF Mode ONLY: Interaction via mouse click (not automatic hover)
-              wordSpan.addEventListener('click', (e) => {
-                if (!mrkyEnabled) return; // Blocked
-                e.stopPropagation();
-                clearTimeout(hideTimeout);
-                document.querySelectorAll('.mrky-word-hover').forEach(s => s.classList.remove('mrky-word-hover'));
-                wordSpan.classList.add('mrky-word-hover');
-                showTooltip(wordSpan, item.word, item.posInfo, fullText);
-              });
-            } else {
-              // Standard Web Mode: Automatic hover interaction
-              wordSpan.addEventListener('mouseenter', () => {
-                if (!mrkyEnabled) return; // Blocked
-                clearTimeout(hideTimeout);
-                wordSpan.classList.add('mrky-word-hover');
-                showTooltip(wordSpan, item.word, item.posInfo, fullText);
-              });
+            // Interaction (only for non-stop words)
+            if (!item.isStop) {
+              const isPdfMode = window.location.pathname.includes('pdf-reader') || el.closest('.textLayer') !== null;
+              
+              if (isPdfMode) {
+                // PDF Mode ONLY: Interaction via mouse click (not automatic hover)
+                wordSpan.addEventListener('click', (e) => {
+                  if (!mrkyEnabled) return; // Blocked
+                  e.stopPropagation();
+                  clearTimeout(hideTimeout);
+                  document.querySelectorAll('.mrky-word-hover').forEach(s => s.classList.remove('mrky-word-hover'));
+                  wordSpan.classList.add('mrky-word-hover');
+                  showTooltip(wordSpan, item.word, item.posInfo, fullText);
+                });
+              } else {
+                // Standard Web Mode: Automatic hover interaction
+                wordSpan.addEventListener('mouseenter', () => {
+                  if (!mrkyEnabled) return; // Blocked
+                  clearTimeout(hideTimeout);
+                  wordSpan.classList.add('mrky-word-hover');
+                  showTooltip(wordSpan, item.word, item.posInfo, fullText);
+                });
 
-              wordSpan.addEventListener('mouseleave', () => {
-                wordSpan.classList.remove('mrky-word-hover');
-                hideTimeout = setTimeout(() => hideTooltip(), 300);
-              });
+                wordSpan.addEventListener('mouseleave', () => {
+                  wordSpan.classList.remove('mrky-word-hover');
+                  hideTimeout = setTimeout(() => hideTooltip(), 300);
+                });
+              }
             }
-          }
 
-          el.appendChild(wordSpan);
+            el.appendChild(wordSpan);
+          } else {
+            // Non-Latin word (Arabic, numbers, emojis) — append as plain text node
+            el.appendChild(document.createTextNode(item.word));
+          }
 
           if (item.post) {
             el.appendChild(document.createTextNode(item.post));

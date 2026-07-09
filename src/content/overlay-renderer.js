@@ -98,55 +98,61 @@ export function renderSubtitles(analyzedWords, fullSentence, videoRect) {
       sentenceEl.appendChild(preSpan);
     }
 
-    // Create the word span
-    const wordSpan = document.createElement('span');
-    wordSpan.className = `mrky-word ${item.posInfo.class}`;
-    wordSpan.textContent = item.word;
-    wordSpan.dataset.word = item.word;
-    wordSpan.dataset.pos = item.pos;
-    wordSpan.style.color = item.posInfo.color;
+    const isLatin = /[a-zA-Z]/.test(item.word);
+    if (isLatin) {
+      // Create the word span
+      const wordSpan = document.createElement('span');
+      wordSpan.className = `mrky-word ${item.posInfo.class}`;
+      wordSpan.textContent = item.word;
+      wordSpan.dataset.word = item.word;
+      wordSpan.dataset.pos = item.pos;
+      wordSpan.style.color = item.posInfo.color;
 
-    // Make stop words / known words semi-transparent
-    if (item.isStop) {
-      wordSpan.classList.add('mrky-stop');
-    }
-    if (item.isKnown) {
-      wordSpan.classList.add('mrky-known');
-    }
+      // Make stop words / known words semi-transparent
+      if (item.isStop) {
+        wordSpan.classList.add('mrky-stop');
+      }
+      if (item.isKnown) {
+        wordSpan.classList.add('mrky-known');
+      }
 
-    // Hover + keyboard interaction (only for non-stop words)
-    if (!item.isStop) {
-      wordSpan.setAttribute('tabindex', '0');
-      wordSpan.setAttribute('role', 'button');
-      wordSpan.setAttribute('aria-label', `${item.word} — ${item.posInfo.label}`);
+      // Hover + keyboard interaction (only for non-stop words)
+      if (!item.isStop) {
+        wordSpan.setAttribute('tabindex', '0');
+        wordSpan.setAttribute('role', 'button');
+        wordSpan.setAttribute('aria-label', `${item.word} — ${item.posInfo.label}`);
 
-      wordSpan.addEventListener('mouseenter', () => {
-        if (!mrkyEnabled) return; // Blocked
-        clearTimeout(hideTimeout);
-        wordSpan.classList.add('mrky-word-hover');
-        showTooltip(wordSpan, item.word, item.posInfo, fullSentence);
-      });
-
-      wordSpan.addEventListener('mouseleave', () => {
-        wordSpan.classList.remove('mrky-word-hover');
-        hideTimeout = setTimeout(() => {
-          hideTooltip();
-        }, 300); // Small delay to let user move to tooltip
-      });
-
-      // Keyboard accessibility: Enter/Space to show tooltip
-      wordSpan.addEventListener('keydown', (e) => {
-        if (!mrkyEnabled) return;
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
+        wordSpan.addEventListener('mouseenter', () => {
+          if (!mrkyEnabled) return; // Blocked
           clearTimeout(hideTimeout);
           wordSpan.classList.add('mrky-word-hover');
           showTooltip(wordSpan, item.word, item.posInfo, fullSentence);
-        }
-      });
-    }
+        });
 
-    sentenceEl.appendChild(wordSpan);
+        wordSpan.addEventListener('mouseleave', () => {
+          wordSpan.classList.remove('mrky-word-hover');
+          hideTimeout = setTimeout(() => {
+            hideTooltip();
+          }, 300); // Small delay to let user move to tooltip
+        });
+
+        // Keyboard accessibility: Enter/Space to show tooltip
+        wordSpan.addEventListener('keydown', (e) => {
+          if (!mrkyEnabled) return;
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            clearTimeout(hideTimeout);
+            wordSpan.classList.add('mrky-word-hover');
+            showTooltip(wordSpan, item.word, item.posInfo, fullSentence);
+          }
+        });
+      }
+
+      sentenceEl.appendChild(wordSpan);
+    } else {
+      // Append non-Latin word as text node
+      sentenceEl.appendChild(document.createTextNode(item.word));
+    }
 
     // Add trailing whitespace/punctuation
     if (item.post) {

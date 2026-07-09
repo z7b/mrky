@@ -192,47 +192,57 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
   });
 
   // ─── Load initial state with site governance ───
-  chrome.storage.local.get(['mrkyEnabled', 'mrkySiteMode', 'mrkyCustomSites'], (res) => {
-    const isEnabled = res.mrkyEnabled !== false;
-    const siteMode = res.mrkySiteMode || 'all';
-    const customSites = res.mrkyCustomSites || [];
+  if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+    chrome.storage.local.get(['mrkyEnabled', 'mrkySiteMode', 'mrkyCustomSites'], (res) => {
+      if (chrome.runtime?.lastError) return;
+      const isEnabled = res?.mrkyEnabled !== false;
+      const siteMode = res?.mrkySiteMode || 'all';
+      const customSites = res?.mrkyCustomSites || [];
 
-    if (isEnabled && isSiteAllowed(siteMode, customSites)) {
-      enableMrky();
-    } else {
-      if (!isEnabled) {
-        console.log('[Mrky] ⏸️ Extension is disabled by user.');
+      if (isEnabled && isSiteAllowed(siteMode, customSites)) {
+        enableMrky();
       } else {
-        console.log(`[Mrky] 🚫 Site "${hostname}" is not allowed in mode "${siteMode}". Mrky will not activate.`);
+        if (!isEnabled) {
+          console.log('[Mrky] ⏸️ Extension is disabled by user.');
+        } else {
+          console.log(`[Mrky] 🚫 Site "${hostname}" is not allowed in mode "${siteMode}". Mrky will not activate.`);
+        }
+        disableMrky();
       }
-      disableMrky();
-    }
-  });
+    });
 
-  // Listen for real-time changes to enabled state AND site governance settings
-  chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== 'local') return;
+    // Listen for real-time changes to enabled state AND site governance settings
+    if (chrome.storage.onChanged) {
+      chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local') return;
 
-    const hasToggleChange = changes.mrkyEnabled !== undefined;
-    const hasModeChange = changes.mrkySiteMode !== undefined;
-    const hasSitesChange = changes.mrkyCustomSites !== undefined;
+        const hasToggleChange = changes.mrkyEnabled !== undefined;
+        const hasModeChange = changes.mrkySiteMode !== undefined;
+        const hasSitesChange = changes.mrkyCustomSites !== undefined;
 
-    if (hasToggleChange || hasModeChange || hasSitesChange) {
-      // Re-evaluate the full state
-      chrome.storage.local.get(['mrkyEnabled', 'mrkySiteMode', 'mrkyCustomSites'], (res) => {
-        const isEnabled = res.mrkyEnabled !== false;
-        const siteMode = res.mrkySiteMode || 'all';
-        const customSites = res.mrkyCustomSites || [];
-        const shouldActivate = isEnabled && isSiteAllowed(siteMode, customSites);
+        if (hasToggleChange || hasModeChange || hasSitesChange) {
+          // Re-evaluate the full state
+          if (!chrome.storage?.local) return;
+          chrome.storage.local.get(['mrkyEnabled', 'mrkySiteMode', 'mrkyCustomSites'], (res) => {
+            if (chrome.runtime?.lastError) return;
+            const isEnabled = res?.mrkyEnabled !== false;
+            const siteMode = res?.mrkySiteMode || 'all';
+            const customSites = res?.mrkyCustomSites || [];
+            const shouldActivate = isEnabled && isSiteAllowed(siteMode, customSites);
 
-        if (shouldActivate && !mrkyEnabled) {
-          enableMrky();
-        } else if (!shouldActivate && mrkyEnabled) {
-          disableMrky();
+            if (shouldActivate && !mrkyEnabled) {
+              enableMrky();
+            } else if (!shouldActivate && mrkyEnabled) {
+              disableMrky();
+            }
+          });
         }
       });
     }
-  });
+  } else {
+    console.warn('[Mrky] ⚠️ chrome.storage is unavailable (context invalidated or unsupported). Defaulting to enabled.');
+    enableMrky();
+  }
 
   console.log('[Mrky] ✅ Mrky initialized successfully');
 })();
