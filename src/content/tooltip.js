@@ -375,25 +375,38 @@ export function isTooltipVisible() {
 function positionTooltip(wordEl) {
   const rect = wordEl.getBoundingClientRect();
   const tooltipRect = tooltipEl.getBoundingClientRect();
+  const tooltipHeight = tooltipRect.height || 180;
+  const tooltipWidth = tooltipRect.width || 260;
 
-  let left = rect.left + rect.width / 2 - 130; // Tooltip is ~260px wide
-  let top = rect.top - 10; // 10px gap above the word
+  let left = rect.left + rect.width / 2 - tooltipWidth / 2;
 
-  // Prevent going off-screen left/right
+  // Prevent going off-screen left/right across all screen sizes
+  const maxLeft = window.innerWidth - tooltipWidth - 10;
   if (left < 10) left = 10;
-  if (left + 260 > window.innerWidth - 10) left = window.innerWidth - 270;
+  if (left > maxLeft) left = Math.max(10, maxLeft);
 
-  // If no room above, show below
-  if (top < 100) {
-    top = rect.bottom + 10;
-    tooltipEl.classList.add('mrky-tooltip-below');
-  } else {
-    tooltipEl.classList.remove('mrky-tooltip-below');
+  // Dynamically position arrow to point exactly at the center of the word
+  const arrowEl = tooltipEl.querySelector('.mrky-tooltip-arrow');
+  if (arrowEl) {
+    const wordCenterX = rect.left + rect.width / 2;
+    const arrowLeft = Math.max(18, Math.min(tooltipWidth - 18, wordCenterX - left));
+    arrowEl.style.left = `${arrowLeft}px`;
   }
 
-  tooltipEl.style.left = `${left}px`;
-  tooltipEl.style.top = `${top}px`;
-  tooltipEl.style.transform = 'translateY(-100%)';
+  // Smart Adaptive Positioning: if near the top edge of viewport, flip below
+  if (rect.top < tooltipHeight + 15) {
+    const top = rect.bottom + 10;
+    tooltipEl.classList.add('mrky-tooltip-below');
+    tooltipEl.style.left = `${left}px`;
+    tooltipEl.style.top = `${top}px`;
+    tooltipEl.style.transform = 'translateY(0)';
+  } else {
+    const top = rect.top - 10;
+    tooltipEl.classList.remove('mrky-tooltip-below');
+    tooltipEl.style.left = `${left}px`;
+    tooltipEl.style.top = `${top}px`;
+    tooltipEl.style.transform = 'translateY(-100%)';
+  }
 }
 
 /**

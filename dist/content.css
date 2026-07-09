@@ -94,17 +94,33 @@
 }
 
 /* POS-specific colors */
-.mrky-noun { color: var(--mrky-noun-blue) !important; }
-.mrky-verb { color: var(--mrky-verb-yellow) !important; }
-.mrky-adj  { color: var(--mrky-adj-green) !important; }
-.mrky-adv  { color: var(--mrky-adv-purple) !important; }
-.mrky-other { color: var(--mrky-other-color) !important; cursor: default; }
+.mrky-noun {
+  color: var(--mrky-noun-blue) !important;
+}
+
+.mrky-verb {
+  color: var(--mrky-verb-yellow) !important;
+}
+
+.mrky-adj {
+  color: var(--mrky-adj-green) !important;
+}
+
+.mrky-adv {
+  color: var(--mrky-adv-purple) !important;
+}
+
+.mrky-other {
+  color: var(--mrky-other-color) !important;
+  cursor: default;
+}
 
 /* Stop words — always subtle */
 .mrky-stop {
   opacity: 0.45;
   cursor: default;
 }
+
 .mrky-stop:hover {
   transform: none;
   text-shadow: none;
@@ -119,7 +135,8 @@
 }
 
 /* Whitespace / punctuation */
-.mrky-pre, .mrky-post {
+.mrky-pre,
+.mrky-post {
   color: var(--mrky-other-color);
   pointer-events: none;
 }
@@ -127,11 +144,25 @@
 /* ─── Page Text Overrides (Blog/Article Light Backgrounds) ─── */
 /* These rules target words inside processed page elements (NOT the video overlay),
    using darker color variants that remain visible on white/light backgrounds. */
-[data-mrky-processed] .mrky-noun { color: #2B6CB0 !important; }
-[data-mrky-processed] .mrky-verb { color: #B7791F !important; }
-[data-mrky-processed] .mrky-adj  { color: #276749 !important; }
-[data-mrky-processed] .mrky-adv  { color: #6B46C1 !important; }
-[data-mrky-processed] .mrky-other { color: #718096 !important; }
+[data-mrky-processed] .mrky-noun {
+  color: #2B6CB0 !important;
+}
+
+[data-mrky-processed] .mrky-verb {
+  color: #B7791F !important;
+}
+
+[data-mrky-processed] .mrky-adj {
+  color: #276749 !important;
+}
+
+[data-mrky-processed] .mrky-adv {
+  color: #6B46C1 !important;
+}
+
+[data-mrky-processed] .mrky-other {
+  color: #718096 !important;
+}
 
 [data-mrky-processed] .mrky-stop {
   opacity: 0.55;
@@ -213,9 +244,13 @@
   background: #fff;
   border-radius: var(--mrky-radius);
   box-shadow: var(--mrky-shadow);
-  padding: 16px 20px;
-  min-width: 220px;
-  max-width: 300px;
+  padding: clamp(14px, 2vw, 18px) clamp(16px, 2.5vw, 22px);
+  width: max-content;
+  min-width: clamp(210px, 45vw, 250px);
+  max-width: clamp(260px, 88vw, 360px);
+  max-height: clamp(240px, 82vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   direction: rtl;
   text-align: right;
 }
@@ -277,8 +312,13 @@
 }
 
 @keyframes mrky-pulse-speak {
-  from { transform: scale(1); }
-  to   { transform: scale(1.15); }
+  from {
+    transform: scale(1);
+  }
+
+  to {
+    transform: scale(1.15);
+  }
 }
 
 .mrky-tooltip-translation {
@@ -536,8 +576,15 @@
 }
 
 @keyframes mrkySlideDown {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Tooltip arrow */
@@ -726,6 +773,7 @@
     opacity: 0;
     transform: translateX(-50%) translateY(-12px);
   }
+
   to {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
@@ -737,6 +785,7 @@
     opacity: 0;
     transform: translate(-50%, -50%) scale(0.92);
   }
+
   to {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
