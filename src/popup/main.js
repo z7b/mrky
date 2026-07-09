@@ -219,6 +219,32 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (englishNote) englishNote.style.display = mode === 'english' ? 'flex' : 'none';
   }
 
+  // Validate domain format and block broad public suffixes / TLDs
+  function isValidDomain(domain) {
+    const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,20}$/i;
+    if (!domainRegex.test(domain)) return false;
+
+    const parts = domain.split('.');
+    
+    // List of common TLDs and two-level public suffixes to block
+    const blockedSuffixes = new Set([
+      'com', 'net', 'org', 'edu', 'gov', 'mil', 'int', 'biz', 'info', 'name', 'pro', 'co', 'io', 'me', 'tv', 'cc',
+      'co.uk', 'org.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'com.au', 'net.au', 'org.au', 'com.br', 'net.br',
+      'co.jp', 'org.jp', 'ne.jp', 'com.sg', 'com.tr', 'co.za', 'co.in', 'net.in', 'org.in'
+    ]);
+
+    if (blockedSuffixes.has(domain)) return false;
+
+    if (parts.length >= 2) {
+      const lastTwo = parts.slice(-2).join('.');
+      if (blockedSuffixes.has(lastTwo) && parts.length < 3) {
+        return false; // e.g. blocks "co.uk" as a domain name, requires "example.co.uk"
+      }
+    }
+
+    return true;
+  }
+
   // Add custom site
   function addCustomSite() {
     const raw = inputCustomSite.value.trim();
@@ -239,6 +265,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     if (!domain) return;
 
+    if (!isValidDomain(domain)) {
+      inputCustomSite.style.borderColor = '#FF6B6B';
+      inputCustomSite.focus();
+      return;
+    }
+    inputCustomSite.style.borderColor = '';
+
     chrome.storage.local.get(['mrkyCustomSites'], (res) => {
       const sites = res.mrkyCustomSites || [];
       if (sites.includes(domain)) {
@@ -257,6 +290,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (inputCustomSite) {
     inputCustomSite.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') addCustomSite();
+    });
+    inputCustomSite.addEventListener('input', () => {
+      inputCustomSite.style.borderColor = '';
     });
   }
 

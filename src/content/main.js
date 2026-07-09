@@ -51,8 +51,15 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
     const totalChars = sampleText.replace(/\s/g, '').length;
     const latinRatio = totalChars > 0 ? latinChars / totalChars : 0;
 
-    // If more than 50% of characters are Latin, consider it English
-    return latinRatio > 0.5;
+    // Split sample text into words and verify existence of English stopwords
+    const words = sampleText.toLowerCase().split(/[^a-z]+/);
+    const englishStopwords = new Set(['the', 'and', 'of', 'to', 'is', 'in', 'that', 'it', 'you', 'was', 'for', 'on', 'are', 'as', 'with']);
+    const stopwordCount = words.filter(w => englishStopwords.has(w)).length;
+    
+    // Heuristic: Must be > 65% Latin and contain a minimum number/ratio of English stopwords
+    const hasEnglishStopwords = stopwordCount >= 2 || (words.length > 0 && (stopwordCount / words.length) > 0.02);
+
+    return latinRatio > 0.65 && hasEnglishStopwords;
   }
 
   /**
@@ -64,6 +71,16 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
   function isSiteAllowed(mode, customSites) {
     // Extension internal pages (popup, review, player, pdf-reader) — always allowed
     if (window.location.protocol === 'chrome-extension:') return true;
+
+    // Video platforms — always allowed at site level because they host multilingual videos.
+    // We handle English language filtering dynamically at the subtitle & paragraph levels.
+    if (
+      hostname.includes('youtube.com') ||
+      hostname.includes('netflix.com') ||
+      hostname.includes('disneyplus.com')
+    ) {
+      return true;
+    }
 
     switch (mode) {
       case 'all':
