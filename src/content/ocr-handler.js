@@ -12,6 +12,7 @@ import { getKnownWordsSet, addCard } from '../shared/db.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 import { mrkyEnabled } from './enabled-state.js';
 import { playPronunciation } from '../shared/audio.js';
+import { incrementUsageOnServer } from '../shared/supabase.js';
 
 let isOCRMode = false;
 let isImageScanMode = false;
@@ -310,6 +311,26 @@ async function showOCRResultPanel(text, analyzed) {
   panel.querySelector('.mrky-btn-add').addEventListener('click', async () => {
     const btn = panel.querySelector('.mrky-btn-add');
     btn.disabled = true;
+    btn.textContent = '⏳ جاري التحقق...';
+
+    // ── Server-side usage gate ──
+    const usageResult = await incrementUsageOnServer('word');
+
+    if (!usageResult.allowed) {
+      if (usageResult.error === 'unauthenticated') {
+        btn.textContent = '🔐 سجّل دخولك أولاً';
+      } else {
+        btn.textContent = '🔒 وصلت الحد اليومي — ترقّ لـ Pro';
+      }
+      btn.classList.add('mrky-btn-locked');
+      setTimeout(() => {
+        btn.textContent = '+ أضف بطاقة';
+        btn.disabled = false;
+        btn.classList.remove('mrky-btn-locked');
+      }, 3000);
+      return;
+    }
+
     btn.textContent = '⏳ جاري الحفظ...';
     const translation = panel.querySelector('.mrky-ocr-result-translation').textContent;
     await addCard({
@@ -319,7 +340,14 @@ async function showOCRResultPanel(text, analyzed) {
       sentence: text,
       contextUrl: window.location.href,
     });
-    btn.textContent = '✅ تم!';
+
+    // Show remaining count for free users
+    if (!usageResult.is_pro && typeof usageResult.count === 'number') {
+      const remaining = 10 - usageResult.count;
+      btn.textContent = `✅ تم! (${remaining} متبقية)`;
+    } else {
+      btn.textContent = '✅ تم!';
+    }
   });
 
   document.body.appendChild(panel);

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mrky — لوحة التحكم</title>
+  <title>PANDA🐼 — لوحة التحكم</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,8 +11,8 @@
     <!-- Header -->
     <header class="popup-header">
       <div class="logo-area">
-        <span class="logo-icon">🎓</span>
-        <h1 class="logo-title">Mrky</h1>
+        <span class="logo-icon">🐼</span>
+        <h1 class="logo-title">PANDA</h1>
       </div>
       <div class="header-actions">
         <button id="btn-open-pdf" class="btn-secondary btn-header-action" title="قارئ ملفات PDF">
@@ -32,7 +32,7 @@
           <span class="toggle-status-label" id="status-label">الإضافة تعمل على جميع المواقع</span>
         </div>
         <div class="toggle-actions-row">
-          <button id="btn-toggle-enable" class="btn-toggle-state enabled" title="إيقاف أو تشغيل أداة Mrky">
+          <button id="btn-toggle-enable" class="btn-toggle-state enabled" title="إيقاف أو تشغيل أداة PANDA">
             <span id="btn-toggle-icon">⚡</span>
             <span id="btn-toggle-text">مفعل</span>
           </button>
@@ -104,6 +104,103 @@
           <span>💡</span>
           <p>الإضافة ستفحص لغة الصفحة تلقائياً وتعمل فقط على المحتوى الإنجليزي. النصوص العربية والصينية وغيرها سيتم تجاهلها.</p>
         </div>
+      </div>
+    </section>
+
+    <!-- PANDA Pro Interactive Accordion Bar & Expandable Card -->
+    <section class="pro-section">
+      <!-- Interactive Summary Toggle Bar (Always Visible) -->
+      <div class="pro-accordion-bar" id="pro-accordion-bar" title="اضغط لعرض أو إخفاء تفاصيل الاشتراك والحساب">
+        <div class="pro-bar-left">
+          <div class="pro-icon-box small">⭐</div>
+          <div class="pro-bar-titles">
+            <span class="pro-bar-main-title" id="pro-status-title">اشتراك PANDA Pro 🐼</span>
+            <span class="pro-bar-sub-title" id="pro-status-desc">اضغط لعرض حالة الباقة وإدارة الحساب</span>
+          </div>
+        </div>
+        <div class="pro-bar-right">
+          <span class="pro-status-tag" id="pro-status-tag">نسخة مجانية</span>
+          <span class="pro-chevron" id="pro-chevron">▼</span>
+        </div>
+      </div>
+
+      <!-- Expandable Dropdown Card Content (Hidden by default, drops down on click) -->
+      <div class="pro-card pro-dropdown hidden" id="pro-card-content">
+        <!-- In-Extension Firebase Auth Box (Sign In & Sign Up) -->
+        <div class="pro-auth-box" id="pro-firebase-login-area">
+          <div class="pro-input-wrapper">
+            <span class="pro-input-icon">📧</span>
+            <input type="email" id="fb-login-email" class="pro-input-field" placeholder="البريد الإلكتروني (مثل USER@gmail.com)" autocomplete="email">
+          </div>
+          <div class="pro-input-wrapper">
+            <span class="pro-input-icon">🔒</span>
+            <input type="password" id="fb-login-password" class="pro-input-field" placeholder="كلمة المرور (6 أحرف على الأقل)">
+          </div>
+          <div class="pro-auth-buttons">
+            <button id="btn-fb-login" class="btn-auth-signin">
+              <span>تسجيل دخول</span> <span>🔥</span>
+            </button>
+            <button id="btn-fb-signup" class="btn-auth-signup">
+              <span>حساب جديد</span> <span>➕</span>
+            </button>
+          </div>
+          <button id="btn-forgot-password" class="btn-forgot-password">نسيت كلمة المرور؟</button>
+        </div>
+
+        <!-- Logged-in User Account Info & Active Plan Dashboard -->
+        <div class="pro-user-dashboard hidden" id="pro-user-dashboard">
+          <div class="user-dashboard-header">
+            <div class="user-profile-info">
+              <span class="user-avatar-icon">👤</span>
+              <div class="user-email-wrap">
+                <span class="user-email-label" id="logged-user-email">USER@GMAIL.COM</span>
+                <span class="user-plan-badge" id="logged-user-plan-badge">باقة مجانية 🆓</span>
+              </div>
+            </div>
+            <button id="btn-logout" class="btn-logout" title="تسجيل الخروج أو تبديل الحساب">خروج 🚪</button>
+          </div>
+          <div class="user-plan-status-card" id="user-plan-status-card">
+            <div class="plan-status-text" id="plan-status-text">
+              حسابك مسجل حالياً بالباقة المجانية. اختر اشتراك شهر أو سنة أدناه للترقية وتفعيل كافة ميزات PANDA Pro!
+            </div>
+          </div>
+        </div>
+
+        <!-- Subscription Upgrade Options (hidden until logged in) -->
+        <div id="pro-payment-section" class="hidden">
+          <div class="pro-pricing-grid" id="pro-upgrade-actions">
+            <button id="btn-monthly-upgrade" class="btn-pricing-card monthly">
+              <div class="pricing-card-top">
+                <span class="pricing-icon">🐼</span>
+                <span class="monthly-ribbon">شهري مرن</span>
+              </div>
+              <div class="pricing-info">
+                <span class="pricing-title">اشتراك شهر</span>
+                <span class="pricing-sub">مرونة شهرية كاملة</span>
+              </div>
+            </button>
+            <button id="btn-annual-upgrade" class="btn-pricing-card annual">
+              <div class="pricing-card-top">
+                <span class="pricing-icon">⭐</span>
+                <span class="savings-ribbon">🔥 الأكثر توفيراً</span>
+              </div>
+              <div class="pricing-info">
+                <span class="pricing-title">اشتراك سنة</span>
+                <span class="pricing-sub">وصول غير محدود لكافة المزايا</span>
+              </div>
+            </button>
+          </div>
+
+          <!-- License Key Divider & Input -->
+          <div class="pro-license-divider">
+            <span>أو عبر مفتاح الترخيص</span>
+          </div>
+          <div class="pro-input-group" id="pro-input-group">
+            <input type="text" id="license-key-input" class="pro-input-field" placeholder="PANDA-PRO-2026">
+            <button id="btn-activate-license" class="btn-pro-activate">تفعيل 🚀</button>
+          </div>
+        </div>
+        <div id="pro-message" class="pro-message hidden"></div>
       </div>
     </section>
 

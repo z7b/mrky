@@ -941,3 +941,64 @@ html.mrky-disabled-mode .mrky-tooltip,
 body.mrky-disabled-mode .mrky-tooltip {
   display: none !important;
 }
+
+/* ─── Locked Button State (Daily Limit Reached) ─── */
+.mrky-btn-locked {
+  background: linear-gradient(135deg, #F6AD55 0%, #ED8936 50%, #DD6B20 100%) !important;
+  color: #FFFBF0 !important;
+  border: 1px solid rgba(255, 183, 77, 0.4) !important;
+  cursor: not-allowed !important;
+  position: relative;
+  overflow: hidden;
+  animation: mrky-locked-pulse 2s ease-in-out infinite;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  font-weight: 600 !important;
+}
+
+.mrky-btn-locked:hover {
+  transform: none !important;
+  box-shadow: 0 0 16px rgba(237, 137, 54, 0.35) !important;
+}
+
+/* Subtle shimmer sweep across the locked button */
+.mrky-btn-locked::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.15) 50%,
+    transparent 100%
+  );
+  animation: mrky-locked-shimmer 3s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Pro nudge badge inside the locked button text */
+.mrky-pro-nudge {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-inline-start: 4px;
+  vertical-align: middle;
+}
+
+@keyframes mrky-locked-pulse {
+  0%, 100% { box-shadow: 0 2px 8px rgba(237, 137, 54, 0.2); }
+  50% { box-shadow: 0 4px 16px rgba(237, 137, 54, 0.4); }
+}
+
+@keyframes mrky-locked-shimmer {
+  0% { left: -100%; }
+  50% { left: 100%; }
+  100% { left: 100%; }
+}

@@ -4,6 +4,8 @@
  */
 import { getAllCards, getDueCards, getKnownWordCount } from '../shared/db.js';
 import { playPronunciation } from '../shared/audio.js';
+import { verifyLicenseKey, loginWithGoogle, openStripeCheckout, openMonthlyCheckout, openAnnualCheckout, checkUserProfileByEmail, fetchDailyUsageFromServer } from '../shared/supabase.js';
+import { checkFirebaseProStatus, loginWithGoogleFirebase, signInWithFirebaseEmailPassword, signUpWithFirebaseEmailPassword, sendPasswordResetEmail } from '../shared/firebase.js';
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM Elements
   const statCardsEl = document.getElementById('stat-cards-count');
@@ -335,6 +337,346 @@ document.addEventListener('DOMContentLoaded', async () => {
       customSitesList.appendChild(item);
     });
   }
+
+  // ─── Mrky Pro Subscription & License Management ───
+  const proAccordionBar = document.getElementById('pro-accordion-bar');
+  const proCardContent = document.getElementById('pro-card-content');
+  const proStatusDesc = document.getElementById('pro-status-desc');
+  const proCard = document.getElementById('pro-card');
+  const proStatusTitle = document.getElementById('pro-status-title');
+  const proStatusTag = document.getElementById('pro-status-tag');
+  const proInputGroup = document.getElementById('pro-input-group');
+  const proUpgradeActions = document.getElementById('pro-upgrade-actions');
+  const proFirebaseLoginArea = document.getElementById('pro-firebase-login-area');
+  const fbLoginEmail = document.getElementById('fb-login-email');
+  const fbLoginPassword = document.getElementById('fb-login-password');
+  const btnFbLogin = document.getElementById('btn-fb-login');
+  const btnFbSignup = document.getElementById('btn-fb-signup');
+  const proUserDashboard = document.getElementById('pro-user-dashboard');
+  const loggedUserEmail = document.getElementById('logged-user-email');
+  const loggedUserPlanBadge = document.getElementById('logged-user-plan-badge');
+  const planStatusText = document.getElementById('plan-status-text');
+  const btnLogout = document.getElementById('btn-logout');
+  const proMessage = document.getElementById('pro-message');
+  const btnActivate = document.getElementById('btn-activate-license');
+  const licenseInput = document.getElementById('license-key-input');
+  const proPaymentSection = document.getElementById('pro-payment-section');
+  const btnForgotPassword = document.getElementById('btn-forgot-password');
+
+  proAccordionBar?.addEventListener('click', () => {
+    if (!proCardContent) return;
+    const isHidden = proCardContent.classList.contains('hidden');
+    if (isHidden) {
+      proCardContent.classList.remove('hidden');
+      proAccordionBar.classList.add('expanded');
+    } else {
+      proCardContent.classList.add('hidden');
+      proAccordionBar.classList.remove('expanded');
+    }
+  });
+
+  function renderPlanStatusDashboard(isPro, planName) {
+    if (!planStatusText) return;
+    if (isPro) {
+      const planLabel = planName === 'annual' ? 'السنوي' : 'الشهري';
+      planStatusText.innerHTML = `
+        <div class="plan-dashboard-box pro">
+          <div class="plan-dashboard-title">
+            <span>🎉 اشتراك PANDA Pro (${planLabel}) مفعّل</span>
+          </div>
+          <p class="plan-dashboard-sub">جميع ميزات الحفظ والتعليل النحوي والمزامنة السحابية مفتوحة لحسابك بلا حدود ✨</p>
+        </div>
+      `;
+      return;
+    }
+
+    const todayStr = new Date().toISOString().slice(0, 10);
+    chrome.storage.local.get(['dailyWordCount', 'dailyExplainCount', 'dailyUsageDate'], (usageData) => {
+      const isToday = usageData.dailyUsageDate === todayStr;
+      const wordUsed = isToday ? (usageData.dailyWordCount || 0) : 0;
+      const explainUsed = isToday ? (usageData.dailyExplainCount || 0) : 0;
+      const wordRem = Math.max(0, 10 - wordUsed);
+      const explainRem = Math.max(0, 10 - explainUsed);
+      const wordPct = Math.min(100, (wordUsed / 10) * 100);
+      const explainPct = Math.min(100, (explainUsed / 10) * 100);
+
+      planStatusText.innerHTML = `
+        <div class="plan-dashboard-box free">
+          <div class="plan-dashboard-title">
+            <span>📊 الاستهلاك اليومي للباقة المجانية (10 / يومياً):</span>
+          </div>
+
+          <div class="usage-meter-row">
+            <div class="usage-meter-head">
+              <span class="usage-meter-label">🔖 حفظ البطاقات للمراجعة</span>
+              <span class="usage-meter-rem ${wordRem === 0 ? 'empty' : ''}">${wordRem} / 10 متبقي</span>
+            </div>
+            <div class="usage-meter-track">
+              <div class="usage-meter-bar ${wordRem === 0 ? 'full' : ''}" style="width: ${wordPct}%;"></div>
+            </div>
+          </div>
+
+          <div class="usage-meter-row">
+            <div class="usage-meter-head">
+              <span class="usage-meter-label">🧠 التعليل النحوي الذكي (AI)</span>
+              <span class="usage-meter-rem ${explainRem === 0 ? 'empty' : ''}">${explainRem} / 10 متبقي</span>
+            </div>
+            <div class="usage-meter-track">
+              <div class="usage-meter-bar ${explainRem === 0 ? 'full' : ''}" style="width: ${explainPct}%;"></div>
+            </div>
+          </div>
+
+          <div class="free-upgrade-hint">
+            <span class="free-upgrade-icon">⚡</span>
+            <span>اختر اشتراك شهر أو سنة أدناه للترقية وفتح الحفظ والتعليل <b>بلا حدود</b>!</span>
+          </div>
+        </div>
+      `;
+    });
+  }
+
+  function updateProUI(isPremium, emailOrKey = '', plan = 'free') {
+    const isEmailLogged = emailOrKey && String(emailOrKey).includes('@');
+    const dividerEl = document.querySelector('.pro-license-divider');
+
+    if (proAccordionBar) {
+      if (isPremium) {
+        proAccordionBar.classList.add('pro-active');
+      } else {
+        proAccordionBar.classList.remove('pro-active');
+      }
+    }
+
+    if (isEmailLogged) {
+      if (proFirebaseLoginArea) proFirebaseLoginArea.style.display = 'none';
+      if (proUserDashboard) proUserDashboard.classList.remove('hidden');
+      if (loggedUserEmail) loggedUserEmail.textContent = String(emailOrKey).toUpperCase();
+
+      if (isPremium) {
+        proCard?.classList.add('pro-active');
+        if (proStatusTitle) proStatusTitle.textContent = '⭐ اشتراك PANDA Pro مفعّل 🐼';
+        if (proStatusTag) proStatusTag.textContent = 'Pro مفعّل ⭐';
+        if (proStatusDesc) proStatusDesc.textContent = 'حساب متصل ومفعل باحترافية ✨';
+        if (loggedUserPlanBadge) {
+          const planText = plan === 'annual' ? 'سنة' : 'شهر';
+          loggedUserPlanBadge.textContent = `باقة PANDA Pro (${planText}) ⭐`;
+          loggedUserPlanBadge.classList.add('pro-badge');
+        }
+        renderPlanStatusDashboard(true, plan);
+        if (proPaymentSection) proPaymentSection.classList.add('hidden');
+      } else {
+        proCard?.classList.remove('pro-active');
+        if (proStatusTitle) proStatusTitle.textContent = 'اشتراك PANDA Pro 🐼';
+        if (proStatusTag) proStatusTag.textContent = 'نسخة مجانية 🆓';
+        if (proStatusDesc) proStatusDesc.textContent = 'مسجل بحساب مجاني (اضغط للترقية)';
+        if (loggedUserPlanBadge) {
+          loggedUserPlanBadge.textContent = 'باقة مجانية 🆓';
+          loggedUserPlanBadge.classList.remove('pro-badge');
+        }
+        renderPlanStatusDashboard(false, 'free');
+        if (proPaymentSection) proPaymentSection.classList.remove('hidden');
+      }
+    } else if (isPremium) {
+      proCard?.classList.add('pro-active');
+      if (proStatusTitle) proStatusTitle.textContent = '⭐ اشتراك PANDA Pro مفعّل 🐼';
+      if (proStatusTag) proStatusTag.textContent = 'Pro مفعّل ⭐';
+      if (proStatusDesc) proStatusDesc.textContent = 'الاشتراك مفعّل بالكامل';
+      if (proFirebaseLoginArea) proFirebaseLoginArea.style.display = 'none';
+      if (proUserDashboard) proUserDashboard.classList.add('hidden');
+      if (proPaymentSection) proPaymentSection.classList.add('hidden');
+    } else {
+      proCard?.classList.remove('pro-active');
+      if (proStatusTitle) proStatusTitle.textContent = 'اشتراك PANDA Pro 🐼';
+      if (proStatusTag) proStatusTag.textContent = 'نسخة مجانية';
+      if (proStatusDesc) proStatusDesc.textContent = 'سجّل دخولك أولاً لعرض الاشتراكات';
+      if (proFirebaseLoginArea) proFirebaseLoginArea.style.display = 'flex';
+      if (proUserDashboard) proUserDashboard.classList.add('hidden');
+      if (proPaymentSection) proPaymentSection.classList.add('hidden');
+    }
+  }
+
+  btnLogout?.addEventListener('click', () => {
+    chrome.storage.local.remove(['isPremium', 'userEmail'], () => {
+      if (fbLoginEmail) fbLoginEmail.value = '';
+      if (fbLoginPassword) fbLoginPassword.value = '';
+      updateProUI(false, '', 'free');
+      proMessage.textContent = 'تم تسجيل الخروج بنجاح 🚪';
+      proMessage.className = 'pro-message success';
+    });
+  });
+
+  chrome.storage.local.get(['isPremium', 'userEmail', 'licenseKey', 'plan'], async (res) => {
+    if (fbLoginEmail && res.userEmail) {
+      fbLoginEmail.value = res.userEmail;
+    }
+    // 1. Show cached UI immediately for fast loading
+    updateProUI(Boolean(res.isPremium), res.userEmail || res.licenseKey, res.plan || 'free');
+
+    // 2. Silently verify with server in the background if email exists
+    if (res.userEmail) {
+      try {
+        const serverProfile = await checkUserProfileByEmail(res.userEmail);
+        if (serverProfile) {
+          const isPro = serverProfile.isPro;
+          const plan = serverProfile.plan || 'free';
+          
+          // If server status is different from local cache, update local cache and UI
+          if (isPro !== res.isPremium || plan !== res.plan) {
+            await chrome.storage.local.set({ isPremium: isPro, plan: plan });
+            updateProUI(Boolean(isPro), res.userEmail, plan);
+          }
+        }
+      } catch (err) {
+        console.error('Silent verification failed:', err);
+      }
+
+      // 3. Fetch real-time quota from server (non-blocking, updates dashboard reactively)
+      fetchDailyUsageFromServer().catch(() => {});
+    }
+  });
+
+  // ── Reactive Dashboard: auto-update progress bars when storage changes ──
+  // This fires when: (a) fetchDailyUsageFromServer writes new counts,
+  // (b) incrementUsageOnServer updates after a word-save or explain action,
+  // (c) any other tab/content-script writes usage data.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const usageKeys = ['dailyWordCount', 'dailyExplainCount', 'dailyUsageDate', 'dailyUsageIsPro'];
+    const hasUsageChange = usageKeys.some(k => k in changes);
+    if (!hasUsageChange) return;
+
+    // Re-render the dashboard with fresh data from storage
+    chrome.storage.local.get(['isPremium', 'plan'], (current) => {
+      renderPlanStatusDashboard(Boolean(current.isPremium), current.plan || 'free');
+    });
+  });
+
+  btnFbLogin?.addEventListener('click', async () => {
+    const email = (fbLoginEmail?.value || '').trim();
+    const password = (fbLoginPassword?.value || '').trim();
+
+    if (!email) {
+      proMessage.textContent = 'الرجاء إدخال البريد الإلكتروني';
+      proMessage.className = 'pro-message error';
+      return;
+    }
+
+    btnFbLogin.disabled = true;
+    btnFbLogin.textContent = 'جاري التحقق...';
+    proMessage.className = 'pro-message hidden';
+
+    const res = await signInWithFirebaseEmailPassword(email, password);
+    btnFbLogin.disabled = false;
+    btnFbLogin.textContent = 'دخول 🔥';
+
+    if (res.success && res.isPro) {
+      updateProUI(true, email, res.plan || 'pro');
+      proMessage.textContent = `🎉 مرحباً! تم تسجيل الدخول وتفعيل اشتراك PANDA Pro بنجاح!`;
+      proMessage.className = 'pro-message success';
+    } else if (res.success && !res.isPro) {
+      await chrome.storage.local.set({ isPremium: false, userEmail: email, plan: 'free' });
+      updateProUI(false, email, 'free');
+      proMessage.textContent = 'حسابك مسجل بالباقة المجانية. اختر اشتراك شهر أو سنة للترقية!';
+      proMessage.className = 'pro-message error';
+    } else {
+      proMessage.textContent = res.error || 'فشل تسجيل الدخول';
+      proMessage.className = 'pro-message error';
+    }
+  });
+
+  btnFbSignup?.addEventListener('click', async () => {
+    const email = (fbLoginEmail?.value || '').trim();
+    const password = (fbLoginPassword?.value || '').trim();
+
+    if (!email) {
+      proMessage.textContent = 'الرجاء إدخال البريد الإلكتروني لإنشاء حساب';
+      proMessage.className = 'pro-message error';
+      return;
+    }
+    if (!password || password.length < 6) {
+      proMessage.textContent = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+      proMessage.className = 'pro-message error';
+      return;
+    }
+
+    btnFbSignup.disabled = true;
+    btnFbSignup.textContent = 'جاري الإنشاء...';
+    proMessage.className = 'pro-message hidden';
+
+    const res = await signUpWithFirebaseEmailPassword(email, password);
+    btnFbSignup.disabled = false;
+    btnFbSignup.textContent = 'حساب جديد ➕';
+
+    if (res.success) {
+      updateProUI(false, email);
+      proMessage.textContent = `🎉 تم إنشاء حسابك بنجاح بالبريد: ${email}! اختر اشتراك شهر أو سنة أدناه للترقية.`;
+      proMessage.className = 'pro-message success';
+    } else {
+      proMessage.textContent = res.error || 'تعذر إنشاء الحساب';
+      proMessage.className = 'pro-message error';
+    }
+  });
+
+  btnForgotPassword?.addEventListener('click', async () => {
+    const email = (fbLoginEmail?.value || '').trim();
+    if (!email) {
+      proMessage.textContent = 'اكتب بريدك الإلكتروني أولاً ثم اضغط "نسيت كلمة المرور"';
+      proMessage.className = 'pro-message error';
+      return;
+    }
+    btnForgotPassword.disabled = true;
+    btnForgotPassword.textContent = 'جاري الإرسال...';
+    const res = await sendPasswordResetEmail(email);
+    btnForgotPassword.disabled = false;
+    btnForgotPassword.textContent = 'نسيت كلمة المرور؟';
+    if (res.success) {
+      proMessage.textContent = `📧 تم إرسال رابط استعادة كلمة المرور إلى ${email}. تفقّد بريدك!`;
+      proMessage.className = 'pro-message success';
+    } else {
+      proMessage.textContent = res.error;
+      proMessage.className = 'pro-message error';
+    }
+  });
+
+  document.getElementById('btn-monthly-upgrade')?.addEventListener('click', () => {
+    chrome.storage.local.get(['userEmail'], (res) => {
+      openMonthlyCheckout(res.userEmail || fbLoginEmail?.value || '');
+    });
+  });
+
+  document.getElementById('btn-annual-upgrade')?.addEventListener('click', () => {
+    chrome.storage.local.get(['userEmail'], (res) => {
+      openAnnualCheckout(res.userEmail || fbLoginEmail?.value || '');
+    });
+  });
+
+  document.getElementById('btn-stripe-upgrade')?.addEventListener('click', () => {
+    chrome.storage.local.get(['userEmail'], (res) => {
+      openAnnualCheckout(res.userEmail || fbLoginEmail?.value || '');
+    });
+  });
+
+  btnActivate?.addEventListener('click', async () => {
+    const key = (licenseInput?.value || '').trim();
+    if (!key) return;
+
+    btnActivate.disabled = true;
+    btnActivate.textContent = 'جاري التحقق...';
+    proMessage.className = 'pro-message hidden';
+
+    const result = await verifyLicenseKey(key);
+    btnActivate.disabled = false;
+    btnActivate.textContent = 'تفعيل 🚀';
+
+    if (result.valid) {
+      updateProUI(true, key);
+      proMessage.textContent = '🎉 تم تفعيل اشتراك Pro بنجاح!';
+      proMessage.className = 'pro-message success';
+    } else {
+      proMessage.textContent = result.error || 'مفتاح الترخيص غير صحيح';
+      proMessage.className = 'pro-message error';
+    }
+  });
 });
 
 /**

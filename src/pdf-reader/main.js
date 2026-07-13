@@ -13,6 +13,10 @@ let scale = 1.3;
 let pageRendering = false;
 let pageNumPending = null;
 
+let currentPdfUrl = null;
+let currentPdfFile = null;
+let currentPdfBuffer = null;
+
 // DOM Elements
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -21,6 +25,8 @@ const viewerContainer = document.getElementById('viewer-container');
 const pdfViewer = document.getElementById('pdf-viewer');
 const readerControls = document.getElementById('reader-controls');
 const btnLoadNew = document.getElementById('btn-load-new');
+const btnDownloadPdf = document.getElementById('btn-download-pdf');
+const btnNativePdf = document.getElementById('btn-native-pdf');
 
 const pageNumSpan = document.getElementById('page-num');
 const pageCountSpan = document.getElementById('page-count');
@@ -77,6 +83,10 @@ function loadPdfFile(file) {
     
     pdfjsLib.getDocument({ data: arrayBuffer }).promise.then((pdf) => {
       pdfDoc = pdf;
+      currentPdfFile = file;
+      currentPdfBuffer = arrayBuffer;
+      currentPdfUrl = null;
+      if (btnNativePdf) btnNativePdf.classList.add('hidden');
       pageCountSpan.textContent = pdf.numPages;
       
       dropZone.classList.add('hidden');
@@ -263,6 +273,10 @@ function loadWebPdf(url) {
   
   pdfjsLib.getDocument({ url: url }).promise.then((pdf) => {
     pdfDoc = pdf;
+    currentPdfUrl = url;
+    currentPdfFile = null;
+    currentPdfBuffer = null;
+    if (btnNativePdf) btnNativePdf.classList.remove('hidden');
     pageCountSpan.textContent = pdf.numPages;
     
     readerControls.classList.remove('hidden');
@@ -319,3 +333,36 @@ function showPdfToast(message, type = 'info') {
     setTimeout(() => toast.remove(), 300);
   }, 4000);
 }
+
+// Handle PDF download button
+btnDownloadPdf?.addEventListener('click', () => {
+  if (currentPdfUrl) {
+    const a = document.createElement('a');
+    a.href = currentPdfUrl;
+    a.download = '';
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } else if (currentPdfFile || currentPdfBuffer) {
+    const blob = currentPdfFile || new Blob([currentPdfBuffer], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = currentPdfFile?.name || 'document.pdf';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } else {
+    showPdfToast('لا يوجد ملف PDF محمل حالياً للتنزيل.', 'error');
+  }
+});
+
+// Handle Open Native Viewer button
+btnNativePdf?.addEventListener('click', () => {
+  if (currentPdfUrl) {
+    const sep = currentPdfUrl.includes('?') ? '&' : '?';
+    window.open(currentPdfUrl + sep + 'mrky_native=1', '_blank');
+  }
+});

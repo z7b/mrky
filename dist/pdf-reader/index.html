@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Mrky — قارئ ملفات PDF التفاعلي</title>
+  <title>PANDA🐼 — قارئ ملفات PDF التفاعلي</title>
   
   <!-- Load Local PDF.js Library -->
   <script src="../pdfjs/pdf.min.js"></script>
@@ -17,8 +17,8 @@
     <!-- Header / Toolbar -->
     <header class="reader-header">
       <div class="header-right">
-        <span class="logo-icon">🎓</span>
-        <h1 class="logo-title">Mrky PDF</h1>
+        <span class="logo-icon">🐼</span>
+        <h1 class="logo-title">PANDA PDF</h1>
       </div>
       
       <!-- Navigation Controls (Visible when PDF is loaded) -->
@@ -48,6 +48,16 @@
           </svg>
           <span class="ocr-btn-text">تحديد النص</span>
         </button>
+
+        <div class="divider"></div>
+
+        <button id="btn-download-pdf" class="btn-action-pill" title="تنزيل وحفظ ملف الـ PDF إلى جهازك">
+          <span>⬇️</span> <span>تنزيل الملف</span>
+        </button>
+        <button id="btn-native-pdf" class="btn-action-pill hidden" title="فتح الملف في عارض المتصفح الأصلي">
+          <span>🌐</span> <span>العارض الأصلي</span>
+        </button>
+      </div>
 
       <div class="header-left">
         <button id="btn-load-new" class="btn-primary btn-sm hidden">فتح ملف آخر 📂</button>

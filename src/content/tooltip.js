@@ -10,6 +10,7 @@ import { mrkyEnabled } from './enabled-state.js';
 import { analyzeText } from '../shared/nlp-processor.js';
 import { getKnownWordsSet } from '../shared/db.js';
 import { generateExplanation } from '../shared/grammar-explainer.js';
+import { incrementUsageOnServer } from '../shared/supabase.js';
 
 let tooltipEl = null;
 let currentWord = null;
@@ -422,6 +423,27 @@ async function handleAddCard(e) {
 
   const btn = tooltipEl.querySelector('.mrky-btn-add');
   btn.disabled = true;
+  btn.textContent = '⏳ جاري التحقق...';
+
+  // ── Server-side usage gate ──
+  const usageResult = await incrementUsageOnServer('word');
+
+  if (!usageResult.allowed) {
+    if (usageResult.error === 'unauthenticated') {
+      btn.textContent = '🔐 سجّل دخولك أولاً';
+      btn.classList.add('mrky-btn-locked');
+    } else {
+      btn.innerHTML = '🔒 وصلت الحد اليومي — <span class="mrky-pro-nudge">ترقّ لـ Pro</span>';
+      btn.classList.add('mrky-btn-locked');
+    }
+    setTimeout(() => {
+      btn.textContent = '+ أضف بطاقة';
+      btn.disabled = false;
+      btn.classList.remove('mrky-btn-locked');
+    }, 3000);
+    return;
+  }
+
   btn.textContent = '⏳ جاري الحفظ...';
 
   try {
@@ -440,12 +462,20 @@ async function handleAddCard(e) {
     btn.textContent = '✅ تم الحفظ!';
     btn.classList.add('mrky-btn-saved');
 
+    // Show remaining count for free users
+    if (!usageResult.is_pro && typeof usageResult.count === 'number') {
+      const remaining = 10 - usageResult.count;
+      if (remaining >= 0) {
+        btn.textContent = `✅ تم الحفظ! (${remaining} متبقية)`;
+      }
+    }
+
     setTimeout(() => {
       btn.textContent = '+ أضف بطاقة';
       btn.disabled = false;
       btn.classList.remove('mrky-btn-saved');
       hideTooltip();
-    }, 1200);
+    }, 1500);
   } catch (error) {
     console.error('[Mrky] Error saving card:', error);
     btn.textContent = '⚠ خطأ';
@@ -567,7 +597,7 @@ async function handleTranslateSentence(e) {
  * No API calls — runs instantly inside the browser.
  * @param {Event} e
  */
-function handleExplainWord(e) {
+async function handleExplainWord(e) {
   if (e) {
     e.stopPropagation();
     e.preventDefault();
@@ -588,13 +618,44 @@ function handleExplainWord(e) {
     return;
   }
 
+  // ── Server-side usage gate ──
+  btn.disabled = true;
+  btn.innerHTML = '<span>⏳</span> <span>جاري التحقق...</span>';
+
+  const usageResult = await incrementUsageOnServer('explain');
+
+  if (!usageResult.allowed) {
+    btn.disabled = false;
+    if (usageResult.error === 'unauthenticated') {
+      btn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+      btn.classList.add('mrky-btn-locked');
+    } else {
+      btn.innerHTML = '<span>🔒</span> <span>وصلت الحد — <span class="mrky-pro-nudge">Pro</span></span>';
+      btn.classList.add('mrky-btn-locked');
+    }
+    setTimeout(() => {
+      btn.innerHTML = '<span>🧠</span> <span>علل</span>';
+      btn.classList.remove('mrky-btn-locked');
+    }, 3000);
+    return;
+  }
+
+  btn.disabled = false;
+
   // Generate explanation using the local rule-based engine (instant — no network)
   const sentence = currentWord.sentence || currentWord.word;
   const htmlContent = generateExplanation(currentWord.word, sentence);
 
   explainBox.innerHTML = htmlContent;
   explainBox.classList.remove('hidden');
-  btn.innerHTML = '<span>✓</span> <span>تم التعليل</span>';
+
+  // Show remaining count for free users
+  if (!usageResult.is_pro && typeof usageResult.count === 'number') {
+    const remaining = 10 - usageResult.count;
+    btn.innerHTML = `<span>✓</span> <span>تم التعليل (${remaining} متبقية)</span>`;
+  } else {
+    btn.innerHTML = '<span>✓</span> <span>تم التعليل</span>';
+  }
 }
 
 /**

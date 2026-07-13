@@ -264,8 +264,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.url) {
     const url = changeInfo.url;
-    // Skip if it's already inside our pdf-reader or some other internal pages
-    if (url.toLowerCase().endsWith('.pdf') && !url.includes('pdf-reader/index.html')) {
+    // Skip if already inside our pdf-reader or when opening in native viewer/download mode
+    if (url.toLowerCase().includes('.pdf') && !url.includes('pdf-reader/index.html') && !url.includes('mrky_native=1') && !url.includes('download=')) {
       const readerUrl = chrome.runtime.getURL(`pdf-reader/index.html?file=${encodeURIComponent(url)}`);
       chrome.tabs.update(tabId, { url: readerUrl });
     }
