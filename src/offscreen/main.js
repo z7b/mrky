@@ -82,8 +82,18 @@ async function playWordAudio(word, sendResponse) {
     return;
   }
 
-  // Security & Usability: Allow basic punctuation for phrases/sentences up to 300 chars
-  if (!/^[a-z0-9 '.,!?-]+$/i.test(cleanWord) || cleanWord.length > 300) {
+  // Normalize smart quotes, curly apostrophes, and em/en dashes to ASCII equivalents
+  // so words copied from web pages pass validation.
+  const normalized = cleanWord
+    .replace(/[\u2018\u2019\u201A\u201B]/g, "'")   // ' ' ‚ ‛ → '
+    .replace(/[\u201C\u201D\u201E\u201F]/g, '"')   // " " „ ‟ → "
+    .replace(/[\u2013\u2014]/g, '-')                // – — → -
+    .replace(/\s+/g, ' ')                           // collapse whitespace
+    .trim();
+
+  // Security: Allow Latin letters (including accented: café, naïve), digits,
+  // basic punctuation, and spaces. Block scripts/tags/control chars.
+  if (!/^[\p{L}\d '.,!?;:()"-]+$/u.test(normalized) || normalized.length > 300) {
     sendResponse({ error: 'Invalid word or sentence format' });
     return;
   }
@@ -100,7 +110,7 @@ async function playWordAudio(word, sendResponse) {
     window.speechSynthesis.cancel();
   }
 
-  const cacheKey = cleanWord.toLowerCase();
+  const cacheKey = normalized.toLowerCase();
 
   try {
     let audioUrl = null;
@@ -116,8 +126,8 @@ async function playWordAudio(word, sendResponse) {
     if (!audioUrl) {
       // ── SOURCE 1: Google Translate Neural TTS (WaveNet — near-human quality) ──
       const ttsUrls = [
-        `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en-US&q=${encodeURIComponent(cleanWord)}`,
-        `https://translate.google.com/translate_tts?ie=UTF-8&client=dict-chrome-ex&tl=en-US&q=${encodeURIComponent(cleanWord)}`
+        `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=en-US&q=${encodeURIComponent(normalized)}`,
+        `https://translate.google.com/translate_tts?ie=UTF-8&client=dict-chrome-ex&tl=en-US&q=${encodeURIComponent(normalized)}`
       ];
       for (const url of ttsUrls) {
         try {
@@ -136,7 +146,7 @@ async function playWordAudio(word, sendResponse) {
       // ── SOURCE 2: Free Dictionary API (Real human Wiktionary/Oxford recordings fallback) ──
       if (!audioUrl) {
         try {
-          const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(cleanWord)}`);
+          const dictRes = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalized)}`);
           if (dictRes.ok) {
             const data = await dictRes.json();
             if (Array.isArray(data)) {
@@ -159,13 +169,13 @@ async function playWordAudio(word, sendResponse) {
             }
           }
         } catch (err) {
-          console.warn('[Mrky Audio] Free Dictionary API failed for:', cleanWord, err);
+          console.warn('[Mrky Audio] Free Dictionary API failed for:', normalized, err);
         }
       }
 
       // ── SOURCE 3: Google Dictionary (Real human recordings hosted by Google fallback) ──
       if (!audioUrl) {
-        const safeWord = encodeURIComponent(cleanWord);
+        const safeWord = encodeURIComponent(normalized);
         const googleDictUrls = [
           `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_us_1.mp3`,
           `https://ssl.gstatic.com/dictionary/static/sounds/20200429/${safeWord}--_gb_1.mp3`,
@@ -199,16 +209,16 @@ async function playWordAudio(word, sendResponse) {
 
       audio.onended = () => {
         currentAudio = null;
-        console.log(`[Mrky Audio] ✅ Played "${cleanWord}" from: ${audioSource}`);
+        console.log(`[Mrky Audio] ✅ Played "${normalized}" from: ${audioSource}`);
         sendResponse({ success: true, source: audioSource });
       };
 
       audio.onerror = (err) => {
-        console.warn(`[Mrky Audio] Audio element error for "${cleanWord}" (${audioSource}), falling back to Web Speech:`, err);
+        console.warn(`[Mrky Audio] Audio element error for "${normalized}" (${audioSource}), falling back to Web Speech:`, err);
         currentAudio = null;
         // Clear bad cache entry
-        audioCache.delete(cleanWord);
-        speakFallback(cleanWord, sendResponse);
+        audioCache.delete(cacheKey);
+        speakFallback(normalized, sendResponse);
       };
 
       await audio.play();
@@ -219,8 +229,8 @@ async function playWordAudio(word, sendResponse) {
   }
 
   // ── SOURCE 4: Web Speech API (browser local voice — last resort) ──
-  console.warn(`[Mrky Audio] No network audio found for "${cleanWord}", using Web Speech API fallback`);
-  speakFallback(cleanWord, sendResponse);
+  console.warn(`[Mrky Audio] No network audio found for "${normalized}", using Web Speech API fallback`);
+  speakFallback(normalized, sendResponse);
 }
 
 /**
