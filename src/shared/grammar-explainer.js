@@ -601,3 +601,81 @@ export function generateExplanation(word, sentence) {
 
   return parts.join('');
 }
+
+/**
+ * ذكاء اصطناعي محلي (Built-in Gemini Nano): يولد شرحاً تفاعلياً ذكياً ومخصصاً للسياق
+ * بالاعتماد على Prompt API في متصفح كروم، مع العودة التلقائية للتعليل المحلي إذا لم يكن مدعوماً.
+ *
+ * Compatibility:
+ *   - Chrome 148+: global `LanguageModel` namespace
+ *   - Chrome 138–147: `window.ai.languageModel` namespace
+ *   - availability() returns 'available' (modern) or 'readily' (legacy)
+ *
+ * @param {string} word
+ * @param {string} sentence
+ * @returns {Promise<string>}
+ */
+export async function getSmartExplanation(word, sentence) {
+  try {
+    // ── 1. Resolve API namespace (modern → legacy) ──
+    const lm =
+      (typeof LanguageModel !== 'undefined' ? LanguageModel : null) ||
+      (typeof ai !== 'undefined' ? ai?.languageModel : null) ||
+      (typeof window !== 'undefined' ? window.ai?.languageModel : null);
+
+    if (!lm || typeof lm.availability !== 'function') {
+      return generateExplanation(word, sentence);
+    }
+
+    // ── 2. Check availability ──
+    const status = await lm.availability();
+    // 'available' (Chrome 148+) or 'readily' (Chrome 138–147)
+    if (status !== 'available' && status !== 'readily') {
+      return generateExplanation(word, sentence);
+    }
+
+    // ── 3. Create session with system prompt ──
+    const session = await lm.create({
+      systemPrompt:
+        'أنت معلم لغة إنجليزية خبير للمتحدثين بالعربية. اشرح الدور النحوي والسياق بإيجاز ووضوح بالعربية.',
+    });
+
+    // ── 4. Build prompt ──
+    const prompt = `حلل كلمة "${word}" في هذه الجملة: "${sentence}".
+اشرح دورها النحوي، صيغتها، ومعناها بالعربية.
+أخرج HTML خام فقط بدون أي أكواد markdown. استخدم هذه الفئات:
+- <div class="mrky-explain-section"> للأقسام
+- <div class="mrky-explain-title"> ✨ عنوان القسم </div> للعناوين
+- <div class="mrky-explain-role"> الدور النحوي أو الشرح </div>
+- <div class="mrky-explain-context"> مثال أو ملاحظة </div>
+اجعل الإجابة أقل من 3 أقسام قصيرة.`;
+
+    // ── 5. Execute with timeout (8s) ──
+    const result = await Promise.race([
+      session.prompt(prompt),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('AI_TIMEOUT')), 8000)
+      ),
+    ]);
+
+    session.destroy();
+
+    if (result && typeof result === 'string' && result.trim()) {
+      let cleanHtml = result.trim();
+      // Strip accidental markdown fences
+      if (cleanHtml.startsWith('```html')) cleanHtml = cleanHtml.substring(7);
+      else if (cleanHtml.startsWith('```')) cleanHtml = cleanHtml.substring(3);
+      if (cleanHtml.endsWith('```'))
+        cleanHtml = cleanHtml.substring(0, cleanHtml.length - 3);
+      return cleanHtml.trim();
+    }
+  } catch (err) {
+    console.warn(
+      '[PANDA AI] Local Gemini Nano unavailable or timed out, using rule-based engine:',
+      err.message || err
+    );
+  }
+
+  // Fallback to rule-based engine
+  return generateExplanation(word, sentence);
+}

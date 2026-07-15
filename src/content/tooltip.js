@@ -9,7 +9,7 @@ import { playPronunciation } from '../shared/audio.js';
 import { mrkyEnabled } from './enabled-state.js';
 import { analyzeText } from '../shared/nlp-processor.js';
 import { getKnownWordsSet } from '../shared/db.js';
-import { generateExplanation } from '../shared/grammar-explainer.js';
+import { generateExplanation, getSmartExplanation } from '../shared/grammar-explainer.js';
 import { incrementUsageOnServer } from '../shared/supabase.js';
 
 let tooltipEl = null;
@@ -642,9 +642,9 @@ async function handleExplainWord(e) {
 
   btn.disabled = false;
 
-  // Generate explanation using the local rule-based engine (instant — no network)
+  // Generate explanation using local Gemini Nano AI if available, falling back to rule-based engine
   const sentence = currentWord.sentence || currentWord.word;
-  const htmlContent = generateExplanation(currentWord.word, sentence);
+  const htmlContent = await getSmartExplanation(currentWord.word, sentence);
 
   explainBox.innerHTML = htmlContent;
   explainBox.classList.remove('hidden');

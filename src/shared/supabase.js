@@ -140,45 +140,56 @@ export async function fetchDailyUsageFromServer() {
 }
 
 /**
- * Check user profile subscription status by Email or User ID in 'profiles' table.
- * @param {string} email
+ * Check user profile subscription status via the secure Edge Function gateway.
+ *
+ * Security: This function previously queried the 'profiles' table directly via
+ * the REST API with the anon key, which allowed anyone with the key to enumerate
+ * any user's subscription status. It now routes through the Edge Function which:
+ *   1. Verifies the Firebase token server-side
+ *   2. Extracts the email from the verified token (not from client params)
+ *   3. Queries the DB with service_role (bypasses RLS, but only returns the
+ *      authenticated user's own data)
+ *
+ * @param {string} email - Used only for the return value and local cache key
  * @returns {Promise<{ isPro: boolean, plan: string, email: string }>}
  */
 export async function checkUserProfileByEmail(email) {
   if (!email) return { isPro: false, plan: 'free', email: '' };
 
   try {
-    // IMPORTANT: This query uses the anon key. You MUST configure RLS on the 'profiles' table
-    // in Supabase to restrict SELECT to only the row matching the queried email.
-    // Without RLS, any user could enumerate all profiles.
+    const token = await getValidFirebaseToken();
+    if (!token) {
+      return { isPro: false, plan: 'free', email };
+    }
+
     const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/profiles?email=eq.${encodeURIComponent(email.trim().toLowerCase())}&select=email,is_pro,plan`,
+      `${SUPABASE_URL}/functions/v1/increment-usage`,
       {
-        method: 'GET',
+        method: 'POST',
         headers: {
           'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        }
+          'X-Firebase-Token': token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ p_type: 'status' }),
       }
     );
 
     if (!response.ok) return { isPro: false, plan: 'free', email };
 
-    const rows = await response.json();
-    if (rows && rows.length > 0) {
-      const profile = rows[0];
-      const isPro = Boolean(profile.is_pro);
-      await chrome.storage.local.set({
-        isPremium: isPro,
-        userEmail: email,
-        plan: profile.plan || (isPro ? 'pro' : 'free')
-      });
-      return { isPro, plan: profile.plan || 'pro', email };
-    }
-    return { isPro: false, plan: 'free', email };
+    const data = await response.json();
+    const isPro = Boolean(data.is_pro);
+    const plan = isPro ? 'pro' : 'free';
+
+    await chrome.storage.local.set({
+      isPremium: isPro,
+      userEmail: email,
+      plan,
+    });
+
+    return { isPro, plan, email };
   } catch (err) {
-    console.error('[Mrky Supabase] Error fetching profile:', err);
+    console.warn('[PANDA Security] Profile check via Edge Function failed:', err.message);
     return { isPro: false, plan: 'free', email };
   }
 }
