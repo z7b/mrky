@@ -19,16 +19,39 @@ function proxyCall(method, ...args) {
     throw new Error('proxyCall should only be used in content scripts');
   }
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: 'DB_PROXY', method, args }, (response) => {
-      if (chrome.runtime.lastError) {
-        return reject(chrome.runtime.lastError);
+    try {
+      if (!chrome.runtime?.id) {
+        throw new Error('Extension context invalidated.');
       }
-      if (response && response.error) {
-        return reject(new Error(response.error));
+      chrome.runtime.sendMessage({ type: 'DB_PROXY', method, args }, (response) => {
+        if (chrome.runtime.lastError) {
+          const errMsg = chrome.runtime.lastError.message || '';
+          if (errMsg.includes('context invalidated') || errMsg.includes('invoking')) {
+            return resolve(getDefaultFallback(method));
+          }
+          return reject(chrome.runtime.lastError);
+        }
+        if (response && response.error) {
+          return reject(new Error(response.error));
+        }
+        resolve(response ? response.result : undefined);
+      });
+    } catch (err) {
+      const errMsg = err?.message || String(err);
+      if (errMsg.includes('context invalidated') || errMsg.includes('invoking')) {
+        // Graceful degradation when extension is updated/reloaded
+        return resolve(getDefaultFallback(method));
       }
-      resolve(response ? response.result : undefined);
-    });
+      reject(err);
+    }
   });
+}
+
+function getDefaultFallback(method) {
+  if (method === 'getKnownWordsSet') return new Set();
+  if (method === 'getAllCards' || method === 'getDueCards') return [];
+  if (method === 'getKnownWordCount') return 0;
+  return undefined;
 }
 
 export async function addCard(card) {

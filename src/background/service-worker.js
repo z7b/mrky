@@ -4,10 +4,12 @@
  * 1. Screenshot capture (chrome.tabs.captureVisibleTab)
  * 2. Translation API proxy (avoids CORS in content scripts)
  * 3. OCR processing delegation
+ * 4. Smart subscription verification (3-layer: immediate, retry, periodic)
  */
 import * as db from '../shared/db.js';
+import { checkUserProfileByEmail } from '../shared/supabase.js';
+import { getValidFirebaseToken } from '../shared/firebase.js';
 
-const TRANSLATION_API = 'https://api.mymemory.translated.net/get';
 
 // Security: Only these db methods can be invoked via the DB_PROXY message.
 // Prevents arbitrary method execution from content scripts or compromised pages.
@@ -48,6 +50,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       handleSpeakOffscreen(message.payload, sendResponse);
       return true;
 
+    case 'VERIFY_SUBSCRIPTION':
+      handleVerifySubscription(message.payload, sendResponse);
+      return true;
+
+    case 'SCHEDULE_SUBSCRIPTION_CHECK':
+      handleScheduleSubscriptionCheck(message.payload, sendResponse);
+      return true;
+
+    case 'CLEAR_SUBSCRIPTION_ALARMS':
+      handleClearSubscriptionAlarms(sendResponse);
+      return true;
+
     default:
       sendResponse({ error: 'Unknown message type' });
   }
@@ -73,130 +87,27 @@ async function handleDbProxy(method, args, sendResponse) {
   }
 }
 
-// Circuit breaker to avoid spamming MyMemory when rate-limited (HTTP 429)
-let myMemoryCooldownUntil = 0;
+// Circuit breaker and caching handled by the unified translate.js engine.
+import { translateWord } from '../shared/translate.js';
 
 /**
  * Handle translation requests from content scripts.
- * @param {{text: string, sourceLang?: string, targetLang?: string}} payload
+ * Delegates to the production-grade translate.js engine
+ * which provides LRU cache, request deduplication, circuit breaker,
+ * rate limit detection, and offline awareness.
+ *
+ * @param {{text: string, context?: string, sourceLang?: string, targetLang?: string}} payload
  * @param {Function} sendResponse
  */
 async function handleTranslation(payload, sendResponse) {
-  const { text, context: rawContext = '', sourceLang = 'en', targetLang = 'ar' } = payload;
-
+  const { text, context = '', sourceLang = 'en', targetLang = 'ar' } = payload;
   try {
-    const context = rawContext.length > 150 ? rawContext.slice(0, 150) : rawContext;
-    let translation = null;
-
-    // 1. Prioritize Google Translate (Fastest, most accurate, no 429 rate limits)
-    const googleResult = await callGoogleTranslateAPI(text, sourceLang, targetLang);
-    if (googleResult && googleResult.toLowerCase().trim() !== text.toLowerCase().trim()) {
-      translation = googleResult;
-    }
-
-    // 2. Try MyMemory fallback only if Google Translate failed or returned untranslated text
-    if (!translation && Date.now() >= myMemoryCooldownUntil) {
-      const result = await callTranslationAPI(text, context, sourceLang, targetLang);
-      if (result.status === 429 || result.status === 403) {
-        // Cooldown MyMemory for 5 minutes when rate-limited
-        myMemoryCooldownUntil = Date.now() + 5 * 60 * 1000;
-      } else if (result.translation && result.translation.toLowerCase().trim() !== text.toLowerCase().trim()) {
-        translation = result.translation;
-      }
-    }
-
-    // Final check - if everything failed, return the word itself as a last resort
-    if (!translation) {
-      translation = text;
-    }
-
-    sendResponse({ translation, match: 1 });
+    const trimmedContext = context.length > 150 ? context.slice(0, 150) : context;
+    const result = await translateWord(text, sourceLang, targetLang, trimmedContext);
+    sendResponse(result);
   } catch (error) {
-    console.error('[Mrky BG] Translation error:', error);
+    console.error('[PANDA BG] Translation error:', error);
     sendResponse({ translation: text, match: 0 });
-  }
-}
-
-/**
- * Call the free Google Translate API.
- */
-async function callGoogleTranslateAPI(text, sourceLang, targetLang) {
-  try {
-    const params = new URLSearchParams({
-      client: 'gtx',
-      sl: sourceLang,
-      tl: targetLang,
-      dt: 't',
-      q: text
-    });
-    const url = `https://translate.googleapis.com/translate_a/single?${params.toString()}`;
-    const response = await fetch(url);
-    if (!response.ok) return null;
-    
-    const data = await response.json();
-    if (data && data[0]) {
-      let translation = '';
-      for (const segment of data[0]) {
-        if (segment && segment[0]) {
-          translation += segment[0];
-        }
-      }
-      return translation || null;
-    }
-    return null;
-  } catch (err) {
-    return null;
-  }
-}
-
-
-/**
- * Call MyMemory translation API.
- * @returns {Promise<{translation: string|null, error: boolean, status: number}>}
- */
-async function callTranslationAPI(text, context, sourceLang, targetLang) {
-  if (Date.now() < myMemoryCooldownUntil) {
-    return { translation: null, error: true, status: 429 };
-  }
-
-  const query = context ? `${text} (in context: ${context})` : text;
-  const params = new URLSearchParams({
-    q: query,
-    langpair: `${sourceLang}|${targetLang}`,
-  });
-
-  try {
-    const response = await fetch(`${TRANSLATION_API}?${params.toString()}`);
-
-    if (!response.ok) {
-      if (response.status === 429 || response.status === 403) {
-        myMemoryCooldownUntil = Date.now() + 5 * 60 * 1000;
-      }
-      return { translation: null, error: true, status: response.status };
-    }
-
-    const data = await response.json();
-
-    if (data.responseStatus !== 200) {
-      if (data.responseStatus === 429 || data.responseStatus === 403) {
-        myMemoryCooldownUntil = Date.now() + 5 * 60 * 1000;
-      }
-      return { translation: null, error: true, status: data.responseStatus };
-    }
-
-    let translation = data.responseData.translatedText;
-
-    // Extract translated word before the parenthesis (strip context echo)
-    if (context && translation.includes('(')) {
-      const parsed = translation.split('(')[0].trim();
-      if (parsed) {
-        translation = parsed;
-      }
-    }
-
-    return { translation, error: false, status: 200 };
-  } catch (err) {
-    return { translation: null, error: true, status: 0 };
   }
 }
 
@@ -251,12 +162,177 @@ async function handleGetStats(sendResponse) {
   sendResponse({ status: 'ok' });
 }
 
+/* ═══════════════════════════════════════════════════════════
+   Smart Subscription Verification System (3-Layer Architecture)
+   Layer 1: Immediate verification (VERIFY_SUBSCRIPTION message)
+   Layer 2: Exponential backoff retry (chrome.alarms)
+   Layer 3: Periodic check every 30 minutes
+   ═══════════════════════════════════════════════════════════ */
+
+const ALARM_SUBSCRIPTION_RETRY = 'panda-subscription-retry';
+const ALARM_SUBSCRIPTION_PERIODIC = 'panda-subscription-periodic';
+const RETRY_DELAYS = [0.083, 0.5, 2]; // minutes: ~5s, 30s, 2min
+
+/**
+ * Layer 1: Immediate subscription verification.
+ * Called by popup/login to get instant status.
+ */
+async function handleVerifySubscription(payload, sendResponse) {
+  const email = payload?.email;
+  if (!email) {
+    sendResponse({ success: false, error: 'no_email' });
+    return;
+  }
+
+  try {
+    const result = await checkUserProfileByEmail(email);
+    if (result && !result.fromCache) {
+      // Server responded authoritatively — update storage
+      await chrome.storage.local.set({
+        isPremium: result.isPro,
+        plan: result.plan || 'free',
+      });
+      console.log(`[PANDA Verify] ✅ Server confirmed: isPro=${result.isPro}, plan=${result.plan}`);
+      sendResponse({ success: true, isPro: result.isPro, plan: result.plan });
+    } else if (result?.fromCache) {
+      // Server unreachable, got cache fallback — schedule retry
+      console.warn('[PANDA Verify] ⚠️ Server unreachable, scheduling retry...');
+      scheduleRetry(0);
+      sendResponse({ success: true, isPro: result.isPro, plan: result.plan, fromCache: true });
+    } else {
+      sendResponse({ success: false, error: 'no_result' });
+    }
+  } catch (err) {
+    console.error('[PANDA Verify] Verification failed:', err);
+    scheduleRetry(0);
+    sendResponse({ success: false, error: err.message });
+  }
+}
+
+/**
+ * Layer 2: Schedule a retry with exponential backoff.
+ * @param {number} attempt - Current retry attempt index (0, 1, 2)
+ */
+function scheduleRetry(attempt) {
+  if (attempt >= RETRY_DELAYS.length) {
+    console.log('[PANDA Verify] Max retries exhausted. Will catch on periodic check.');
+    return;
+  }
+  const delayMinutes = RETRY_DELAYS[attempt];
+  const alarmName = `${ALARM_SUBSCRIPTION_RETRY}_${attempt}`;
+  chrome.alarms.create(alarmName, { delayInMinutes: delayMinutes });
+  console.log(`[PANDA Verify] 🔄 Retry #${attempt + 1} scheduled in ${delayMinutes} min`);
+}
+
+/**
+ * Set up both immediate verification and periodic checking.
+ * Called after login.
+ */
+async function handleScheduleSubscriptionCheck(payload, sendResponse) {
+  const email = payload?.email;
+  if (!email) {
+    sendResponse?.({ success: false });
+    return;
+  }
+
+  // Schedule Layer 2: immediate first retry (covers Edge Function cold start)
+  scheduleRetry(0);
+
+  // Schedule Layer 3: periodic check every 30 minutes
+  chrome.alarms.create(ALARM_SUBSCRIPTION_PERIODIC, {
+    delayInMinutes: 30,
+    periodInMinutes: 30,
+  });
+  console.log('[PANDA Verify] 📅 Periodic subscription check scheduled (every 30 min)');
+
+  sendResponse?.({ success: true });
+}
+
+/**
+ * Clear all subscription alarms (called on logout).
+ */
+async function handleClearSubscriptionAlarms(sendResponse) {
+  // Clear all retry alarms
+  for (let i = 0; i < RETRY_DELAYS.length; i++) {
+    await chrome.alarms.clear(`${ALARM_SUBSCRIPTION_RETRY}_${i}`);
+  }
+  // Clear periodic alarm
+  await chrome.alarms.clear(ALARM_SUBSCRIPTION_PERIODIC);
+  console.log('[PANDA Verify] 🧹 All subscription alarms cleared');
+  sendResponse?.({ success: true });
+}
+
+/**
+ * Alarm listener: handles both retry and periodic verification.
+ */
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  // Handle retry alarms (panda-subscription-retry_0, _1, _2)
+  if (alarm.name.startsWith(ALARM_SUBSCRIPTION_RETRY)) {
+    const attempt = parseInt(alarm.name.split('_').pop(), 10);
+    console.log(`[PANDA Verify] ⏰ Retry alarm #${attempt + 1} fired`);
+
+    const stored = await chrome.storage.local.get(['userEmail']);
+    if (!stored.userEmail) return; // Logged out
+
+    try {
+      const result = await checkUserProfileByEmail(stored.userEmail);
+      if (result && !result.fromCache) {
+        // Server responded authoritatively
+        await chrome.storage.local.set({
+          isPremium: result.isPro,
+          plan: result.plan || 'free',
+        });
+        console.log(`[PANDA Verify] ✅ Retry succeeded: isPro=${result.isPro}`);
+      } else {
+        // Still failing — schedule next retry
+        scheduleRetry(attempt + 1);
+      }
+    } catch (err) {
+      console.warn(`[PANDA Verify] Retry #${attempt + 1} failed:`, err.message);
+      scheduleRetry(attempt + 1);
+    }
+    return;
+  }
+
+  // Handle periodic alarm
+  if (alarm.name === ALARM_SUBSCRIPTION_PERIODIC) {
+    console.log('[PANDA Verify] ⏰ Periodic subscription check fired');
+
+    const stored = await chrome.storage.local.get(['userEmail']);
+    if (!stored.userEmail) {
+      // User logged out — clear periodic alarm
+      await chrome.alarms.clear(ALARM_SUBSCRIPTION_PERIODIC);
+      return;
+    }
+
+    try {
+      const result = await checkUserProfileByEmail(stored.userEmail);
+      if (result && !result.fromCache) {
+        await chrome.storage.local.set({
+          isPremium: result.isPro,
+          plan: result.plan || 'free',
+        });
+        console.log(`[PANDA Verify] ✅ Periodic check: isPro=${result.isPro}`);
+      }
+    } catch (err) {
+      console.warn('[PANDA Verify] Periodic check failed:', err.message);
+    }
+  }
+});
+
 // Extension install/update event
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
     console.log('[Mrky] 🎓 Extension installed! Welcome to Mrky.');
   } else if (details.reason === 'update') {
     console.log('[Mrky] 🔄 Extension updated to version', chrome.runtime.getManifest().version);
+
+    // On update, re-verify subscription for logged-in users
+    chrome.storage.local.get(['userEmail'], (stored) => {
+      if (stored.userEmail) {
+        scheduleRetry(0);
+      }
+    });
   }
 });
 

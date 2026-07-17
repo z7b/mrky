@@ -86,7 +86,6 @@ export function initOCR() {
   // Message listener for popup triggers
   if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (!mrkyEnabled) return;
       if (message.type === 'TRIGGER_OCR_SELECTION') {
         if (isOCRMode) {
           exitOCRMode();
@@ -102,7 +101,6 @@ export function initOCR() {
 
   // DOM event listener for internal page buttons (like PDF Reader toolbar)
   document.addEventListener('mrky-trigger-ocr', () => {
-    if (!mrkyEnabled) return;
     if (isOCRMode) {
       exitOCRMode();
     } else if (isImageScanMode) {
@@ -117,7 +115,6 @@ export function initOCR() {
  * Enter OCR area-selection mode.
  */
 function enterOCRMode() {
-  if (!mrkyEnabled) return;
   isOCRMode = true;
 
   ocrOverlay = document.createElement('div');
@@ -125,13 +122,7 @@ function enterOCRMode() {
   ocrOverlay.className = 'mrky-ocr-overlay';
   ocrOverlay.setAttribute('role', 'dialog');
   ocrOverlay.setAttribute('aria-label', 'وضع استخراج النص من الصور');
-  ocrOverlay.innerHTML = `
-    <div class="mrky-ocr-hint" role="alert">
-      <span>📷</span>
-      <span>ارسم مربع على النص لاستخراجه وترجمته</span>
-      <span class="mrky-ocr-hint-key">ESC للإلغاء</span>
-    </div>
-  `;
+  // The OCR hint banner has been removed per user request
 
   selectionBox = document.createElement('div');
   selectionBox.className = 'mrky-ocr-selection';
@@ -163,6 +154,7 @@ function handleESC(e) {
 }
 
 function handleMouseDown(e) {
+  e.preventDefault(); // Prevent text selection on the page while drawing the OCR box
   startX = e.clientX;
   startY = e.clientY;
   selectionBox.style.left = `${startX}px`;
@@ -213,7 +205,27 @@ async function handleMouseUp(e) {
 
     // ── Strategy 2: Screenshot crop (for normal web pages) ──
     if (!croppedImage) {
+      // Temporarily hide OCR overlay and tooltip to get a clean screenshot of the page
+      if (ocrOverlay) ocrOverlay.style.setProperty('display', 'none', 'important');
+      const tooltip = document.getElementById('mrky-tooltip');
+      let originalTooltipDisplay = '';
+      if (tooltip) {
+        originalTooltipDisplay = tooltip.style.display;
+        tooltip.style.display = 'none';
+      }
+
+      // Force layout calculation and wait for paint to ensure overlays are hidden before screenshot
+      document.body.offsetHeight;
+      await new Promise(r => setTimeout(r, 60));
+
       const screenshot = await captureScreenshot();
+
+      // Restore OCR overlay and tooltip visibility immediately
+      if (ocrOverlay) ocrOverlay.style.removeProperty('display');
+      if (tooltip) {
+        tooltip.style.display = originalTooltipDisplay;
+      }
+
       if (screenshot) {
         croppedImage = await cropImage(screenshot, rect);
       }
@@ -248,6 +260,14 @@ async function showOCRResultPanel(text, analyzed) {
 
   const panel = document.createElement('div');
   panel.className = 'mrky-ocr-panel mrky-tooltip mrky-tooltip-visible';
+  panel.style.cssText = `
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    margin: 0 !important;
+    z-index: 2147483647 !important;
+  `;
   panel.dataset.mrkyProcessed = 'true'; // Force light-theme CSS overrides for text colors
 
   // Security: Build colored words safely using DOM methods to prevent XSS from OCR output
@@ -395,7 +415,6 @@ async function showOCRResultPanel(text, analyzed) {
 let imageHighlights = [];
 
 function enterImageScanMode() {
-  if (!mrkyEnabled) return;
   isImageScanMode = true;
 
   // Show hint banner
@@ -467,7 +486,27 @@ async function handleImageClick(e) {
 
     // If the image is from another domain, capture screenshot and crop instead
     if (imageSource.startsWith('data:') || isCrossOrigin(img)) {
+      // Temporarily hide loading overlay and tooltip to get a clean screenshot of the page
+      if (loadingOverlay) loadingOverlay.style.setProperty('display', 'none', 'important');
+      const tooltip = document.getElementById('mrky-tooltip');
+      let originalTooltipDisplay = '';
+      if (tooltip) {
+        originalTooltipDisplay = tooltip.style.display;
+        tooltip.style.display = 'none';
+      }
+
+      // Force layout calculation and wait for paint to ensure overlays are hidden before screenshot
+      document.body.offsetHeight;
+      await new Promise(r => setTimeout(r, 60));
+
       const screenshot = await captureScreenshot();
+
+      // Restore loading overlay and tooltip visibility immediately
+      if (loadingOverlay) loadingOverlay.style.removeProperty('display');
+      if (tooltip) {
+        tooltip.style.display = originalTooltipDisplay;
+      }
+
       if (screenshot) {
         imageSource = await cropImage(screenshot, {
           left: imgRect.left,

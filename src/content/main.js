@@ -108,7 +108,14 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
   function startObservers() {
     if (hostname.includes('youtube.com')) {
       console.log('[Mrky] 📺 YouTube detected');
-      startVideoObserver('youtube');
+
+      // Only start video observer on actual video pages (not homepage/search/channels)
+      const isVideoPage = /\/(watch|shorts|embed)/.test(location.pathname);
+      if (isVideoPage) {
+        startVideoObserver('youtube');
+      } else {
+        console.log('[Mrky] YouTube non-video page — waiting for navigation to a video...');
+      }
 
       // Re-initialize observer on YouTube SPA navigation
       // Use <title> observation instead of document.body to avoid CPU waste
@@ -118,8 +125,9 @@ import { mrkyEnabled, setMrkyEnabled } from './enabled-state.js';
         window.__mrkyYTObserver = new MutationObserver(() => {
           if (location.href !== lastUrl) {
             lastUrl = location.href;
-            console.log('[Mrky] YouTube navigation detected, re-initializing...');
-            if (mrkyEnabled) {
+            const navigatedToVideo = /\/(watch|shorts|embed)/.test(new URL(location.href).pathname);
+            if (mrkyEnabled && navigatedToVideo) {
+              console.log('[Mrky] YouTube navigation to video page, starting observer...');
               setTimeout(() => startVideoObserver('youtube'), 1500);
             }
           }

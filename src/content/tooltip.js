@@ -135,6 +135,9 @@ async function handleMouseSelection(e) {
   const isPdfReader = window.location.pathname.includes('pdf-reader') || document.querySelector('.pdf-viewer') !== null;
   if (!isPdfReader) return;
 
+  // Skip if OCR mode is active (prevents tooltip from popping up while drawing OCR boxes)
+  if (document.querySelector('.mrky-ocr-overlay') || document.querySelector('.mrky-img-ocr-loading')) return;
+
   setTimeout(async () => {
     const selection = window.getSelection();
     if (!selection) return;
@@ -170,14 +173,17 @@ async function handleMouseSelection(e) {
       const range = selection.getRangeAt(0);
       let rect = range.getBoundingClientRect();
       
-      // Fallback for PDF.js text layer (where selection ranges might return empty rects due to transparent elements)
-      if (rect.width === 0 || rect.height === 0) {
-        const anchorNode = selection.anchorNode;
-        if (anchorNode && anchorNode.parentElement && anchorNode.parentElement.getBoundingClientRect) {
-          rect = anchorNode.parentElement.getBoundingClientRect();
-        } else {
-          return;
-        }
+      // Fallback for PDF.js text layer (where selection ranges might return empty rects)
+      if (rect.width === 0 || rect.height === 0 || rect.top === 0) {
+        // Use the mouse position where the user released the click as the anchor
+        rect = {
+          top: e.clientY,
+          bottom: e.clientY,
+          left: e.clientX,
+          right: e.clientX,
+          width: 0,
+          height: 0
+        };
       }
       
       if (rect.width === 0 && rect.height === 0) return;
@@ -447,8 +453,16 @@ async function handleAddCard(e) {
   btn.textContent = '⏳ جاري الحفظ...';
 
   try {
-    // Request screenshot from background script
+    // Re-check currentWord after async gap — user may have dismissed tooltip during await
+    if (!currentWord) return;
+
+    // Temporarily hide tooltip to capture clean page screenshot
+    if (tooltipEl) tooltipEl.style.setProperty('display', 'none', 'important');
     const screenshot = await captureScreenshot();
+    if (tooltipEl) tooltipEl.style.removeProperty('display');
+
+    // Re-check again after screenshot capture
+    if (!currentWord) return;
 
     await addCard({
       word: currentWord.word,

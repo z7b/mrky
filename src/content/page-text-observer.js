@@ -74,97 +74,7 @@ function processPageText() {
     const end = Math.min(index + batchSize, elements.length);
     for (let i = index; i < end; i++) {
       const el = elements[i];
-
-      // Safe mode: Only process elements that contain pure text and NO child elements (like <a> or <strong>)
-      if (el.children.length === 0 && el.textContent.trim().length > 0) {
-        const fullText = el.textContent;
-        
-        // Skip text without alphabetical characters
-        if (!/[a-zA-Z]/.test(fullText)) {
-          el.dataset.mrkyProcessed = 'true';
-          continue;
-        }
-
-        // Skip text that is predominantly non-English (e.g. Arabic, Chinese, etc.)
-        // Only process paragraphs where at least 40% of characters are Latin
-        const strippedText = fullText.replace(/\s/g, '');
-        const latinCount = (fullText.match(/[a-zA-Z]/g) || []).length;
-        if (strippedText.length > 10 && latinCount / strippedText.length < 0.4) {
-          el.dataset.mrkyProcessed = 'true';
-          continue;
-        }
-
-        // Analyze the text
-        const analyzed = analyzeText(fullText, knownWords);
-        
-        // Clear the element and mark it
-        el.innerHTML = '';
-        el.dataset.mrkyProcessed = 'true';
-
-        // Rebuild the element with interactive spans
-        for (const item of analyzed) {
-          if (item.pre) {
-            el.appendChild(document.createTextNode(item.pre));
-          }
-
-          const isLatin = /[a-zA-Z]/.test(item.word);
-          if (isLatin) {
-            const wordSpan = document.createElement('span');
-            wordSpan.className = `mrky-word ${item.posInfo.class}`;
-            wordSpan.textContent = item.word;
-            wordSpan.dataset.word = item.word;
-            wordSpan.dataset.pos = item.pos;
-            // Color is applied via CSS class (.mrky-noun, .mrky-verb, etc.)
-            // NOT inline style — so page-context overrides for light backgrounds work correctly
-
-            // Apply visual classes
-            if (item.isStop) wordSpan.classList.add('mrky-stop');
-            if (item.isKnown) wordSpan.classList.add('mrky-known');
-
-            // Interaction (only for non-stop words)
-            if (!item.isStop) {
-              const isPdfMode = window.location.pathname.includes('pdf-reader') || el.closest('.textLayer') !== null;
-              
-              if (isPdfMode) {
-                // PDF Mode ONLY: Interaction via mouse click (not automatic hover)
-                wordSpan.addEventListener('click', (e) => {
-                  if (!mrkyEnabled) return; // Blocked
-                  e.stopPropagation();
-                  clearTimeout(hideTimeout);
-                  document.querySelectorAll('.mrky-word-hover').forEach(s => s.classList.remove('mrky-word-hover'));
-                  wordSpan.classList.add('mrky-word-hover');
-                  showTooltip(wordSpan, item.word, item.posInfo, fullText);
-                });
-              } else {
-                // Standard Web Mode: Automatic hover interaction
-                wordSpan.addEventListener('mouseenter', () => {
-                  if (!mrkyEnabled) return; // Blocked
-                  clearTimeout(hideTimeout);
-                  wordSpan.classList.add('mrky-word-hover');
-                  showTooltip(wordSpan, item.word, item.posInfo, fullText);
-                });
-
-                wordSpan.addEventListener('mouseleave', () => {
-                  wordSpan.classList.remove('mrky-word-hover');
-                  hideTimeout = setTimeout(() => hideTooltip(), 300);
-                });
-              }
-            }
-
-            el.appendChild(wordSpan);
-          } else {
-            // Non-Latin word (Arabic, numbers, emojis) — append as plain text node
-            el.appendChild(document.createTextNode(item.word));
-          }
-
-          if (item.post) {
-            el.appendChild(document.createTextNode(item.post));
-          }
-        }
-      } else {
-        // Skip formatting element safely but mark it as processed
-        el.dataset.mrkyProcessed = 'true';
-      }
+      processElementTextNodes(el);
     }
 
     index = end;
@@ -178,4 +88,123 @@ function processPageText() {
   }
 
   processBatch();
+}
+
+/**
+ * Recursively find all text nodes within a element, avoiding tags like script, style, pre, etc.
+ */
+function getTextNodes(node) {
+  const textNodes = [];
+  function traverse(n) {
+    const ignoredTags = ['SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'CODE', 'PRE', 'NOSCRIPT', 'IFRAME', 'SVG', 'MATH'];
+    if (n.nodeType === Node.ELEMENT_NODE) {
+      if (ignoredTags.includes(n.tagName) || n.classList.contains('mrky-word') || n.dataset.mrkyProcessed) {
+        return;
+      }
+      for (const child of Array.from(n.childNodes)) {
+        traverse(child);
+      }
+    } else if (n.nodeType === Node.TEXT_NODE) {
+      if (n.textContent.trim().length > 0) {
+        textNodes.push(n);
+      }
+    }
+  }
+  traverse(node);
+  return textNodes;
+}
+
+/**
+ * Process text nodes inside a container individually to preserve links and HTML tags.
+ */
+function processElementTextNodes(el) {
+  const textNodes = getTextNodes(el);
+  const parentText = el.textContent; // Used for full sentence context in tooltips
+
+  for (const node of textNodes) {
+    const fullText = node.textContent;
+    
+    // Skip text without alphabetical characters
+    if (!/[a-zA-Z]/.test(fullText)) {
+      continue;
+    }
+
+    // Skip text that is predominantly non-English
+    const strippedText = fullText.replace(/\s/g, '');
+    const latinCount = (fullText.match(/[a-zA-Z]/g) || []).length;
+    if (strippedText.length > 10 && latinCount / strippedText.length < 0.4) {
+      continue;
+    }
+
+    // Analyze the text
+    const analyzed = analyzeText(fullText, knownWords);
+    
+    const fragment = document.createDocumentFragment();
+    const parentEl = node.parentNode || el;
+
+    // Rebuild text node content with interactive spans and plain text segments
+    for (const item of analyzed) {
+      if (item.pre) {
+        fragment.appendChild(document.createTextNode(item.pre));
+      }
+
+      const isLatin = /[a-zA-Z]/.test(item.word);
+      if (isLatin) {
+        const wordSpan = document.createElement('span');
+        wordSpan.className = `mrky-word ${item.posInfo.class}`;
+        wordSpan.textContent = item.word;
+        wordSpan.dataset.word = item.word;
+        wordSpan.dataset.pos = item.pos;
+
+        // Apply visual classes
+        if (item.isStop) wordSpan.classList.add('mrky-stop');
+        if (item.isKnown) wordSpan.classList.add('mrky-known');
+
+        // Interaction (only for non-stop words)
+        if (!item.isStop) {
+          const isPdfMode = window.location.pathname.includes('pdf-reader') || parentEl.closest('.textLayer') !== null;
+          
+          if (isPdfMode) {
+            wordSpan.addEventListener('click', (e) => {
+              if (!mrkyEnabled) return;
+              e.stopPropagation();
+              clearTimeout(hideTimeout);
+              document.querySelectorAll('.mrky-word-hover').forEach(s => s.classList.remove('mrky-word-hover'));
+              wordSpan.classList.add('mrky-word-hover');
+              showTooltip(wordSpan, item.word, item.posInfo, parentText);
+            });
+          } else {
+            wordSpan.addEventListener('mouseenter', () => {
+              if (!mrkyEnabled) return;
+              clearTimeout(hideTimeout);
+              wordSpan.classList.add('mrky-word-hover');
+              showTooltip(wordSpan, item.word, item.posInfo, parentText);
+            });
+
+            wordSpan.addEventListener('mouseleave', () => {
+              wordSpan.classList.remove('mrky-word-hover');
+              hideTimeout = setTimeout(() => hideTooltip(), 300);
+            });
+          }
+        }
+
+        fragment.appendChild(wordSpan);
+      } else {
+        // Non-Latin word (Arabic, numbers, emojis) — append as plain text node
+        fragment.appendChild(document.createTextNode(item.word));
+      }
+
+      if (item.post) {
+        fragment.appendChild(document.createTextNode(item.post));
+      }
+    }
+
+    // Safely replace the text node with our new spans and text nodes
+    if (node.parentNode) {
+      node.parentNode.replaceChild(fragment, node);
+    }
+  }
+
+  // Mark container as processed
+  el.dataset.mrkyProcessed = 'true';
 }

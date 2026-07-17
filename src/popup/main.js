@@ -5,7 +5,7 @@
 import { getAllCards, getDueCards, getKnownWordCount } from '../shared/db.js';
 import { playPronunciation } from '../shared/audio.js';
 import { verifyLicenseKey, loginWithGoogle, openStripeCheckout, openMonthlyCheckout, openAnnualCheckout, checkUserProfileByEmail, fetchDailyUsageFromServer } from '../shared/supabase.js';
-import { checkFirebaseProStatus, loginWithGoogleFirebase, signInWithFirebaseEmailPassword, signUpWithFirebaseEmailPassword, sendPasswordResetEmail } from '../shared/firebase.js';
+import { checkFirebaseProStatus, loginWithGoogleFirebase, signInWithFirebaseEmailPassword, signUpWithFirebaseEmailPassword, sendPasswordResetEmail, resendVerificationEmail } from '../shared/firebase.js';
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM Elements
   const statCardsEl = document.getElementById('stat-cards-count');
@@ -101,13 +101,66 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (btnTriggerOcr) {
     btnTriggerOcr.addEventListener('click', async () => {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) {
-        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_OCR_SELECTION' }, () => {
-          // Ignore chrome.runtime.lastError in case content script is not loaded
-          if (chrome.runtime.lastError) {}
-        });
-        window.close(); // Close popup so they can draw on screen
+      if (!tab || !tab.id) return;
+
+      // Skip restricted browser URLs
+      if (tab.url && (
+        tab.url.startsWith('chrome://') || 
+        tab.url.startsWith('edge://') || 
+        tab.url.startsWith('about:') || 
+        tab.url.startsWith('chrome-extension://') ||
+        tab.url.startsWith('https://chrome.google.com/') ||
+        tab.url.startsWith('https://chromewebstore.google.com/')
+      )) {
+        console.warn('[PANDA Popup] Cannot run OCR on browser restricted page:', tab.url);
+        return;
       }
+
+      const originalHTML = btnTriggerOcr.innerHTML;
+      btnTriggerOcr.disabled = true;
+      btnTriggerOcr.innerHTML = '<span>جاري التفعيل...</span>';
+
+      const sendMessageAndClose = () => {
+        chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_OCR_SELECTION' }, () => {
+          if (chrome.runtime.lastError) {
+            console.error('[PANDA Popup] Send message error:', chrome.runtime.lastError.message);
+          }
+          window.close();
+        });
+      };
+
+      chrome.tabs.sendMessage(tab.id, { type: 'TRIGGER_OCR_SELECTION' }, async (response) => {
+        if (chrome.runtime.lastError) {
+          const errMsg = chrome.runtime.lastError.message || '';
+          if (errMsg.includes('Receiving end does not exist') || errMsg.includes('connection')) {
+            console.log('[PANDA Popup] Content script not detected. Injecting dynamically...');
+            try {
+              // Inject CSS
+              await chrome.scripting.insertCSS({
+                target: { tabId: tab.id },
+                files: ['content.css']
+              });
+              // Inject JS
+              await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content.js']
+              });
+              // Brief delay for init, then trigger
+              setTimeout(sendMessageAndClose, 150);
+            } catch (err) {
+              console.error('[PANDA Popup] Failed to inject content script dynamically:', err);
+              btnTriggerOcr.disabled = false;
+              btnTriggerOcr.innerHTML = originalHTML;
+            }
+          } else {
+            console.error('[PANDA Popup] Unknown send message error:', errMsg);
+            btnTriggerOcr.disabled = false;
+            btnTriggerOcr.innerHTML = originalHTML;
+          }
+        } else {
+          window.close();
+        }
+      });
     });
   }
 
@@ -496,7 +549,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   btnLogout?.addEventListener('click', () => {
-    chrome.storage.local.remove(['isPremium', 'userEmail'], () => {
+    // Clear all subscription verification alarms in the service worker
+    chrome.runtime.sendMessage({ type: 'CLEAR_SUBSCRIPTION_ALARMS' }).catch(() => {});
+
+    chrome.storage.local.remove([
+      'isPremium', 'userEmail', 'plan', 'licenseKey',
+      'firebaseToken', 'firebaseRefreshToken', 'firebaseTokenExpiry',
+      'dailyWordCount', 'dailyExplainCount', 'dailyUsageDate', 'dailyUsageIsPro'
+    ], () => {
       if (fbLoginEmail) fbLoginEmail.value = '';
       if (fbLoginPassword) fbLoginPassword.value = '';
       updateProUI(false, '', 'free');
@@ -515,7 +575,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 2. Silently verify with server in the background if email exists
     if (res.userEmail) {
       try {
-        const serverProfile = await checkUserProfileByEmail(res.userEmail);
+        let serverProfile = await checkUserProfileByEmail(res.userEmail);
+        
+        // Retry once if server returned a fallback (Edge Function may have cold-started/EarlyDrop)
+        if (serverProfile && !serverProfile.isPro && res.isPremium) {
+          await new Promise(r => setTimeout(r, 1500));
+          serverProfile = await checkUserProfileByEmail(res.userEmail);
+        }
+        
         if (serverProfile) {
           const isPro = serverProfile.isPro;
           const plan = serverProfile.plan || 'free';
@@ -527,7 +594,8 @@ document.addEventListener('DOMContentLoaded', async () => {
           }
         }
       } catch (err) {
-        console.error('Silent verification failed:', err);
+        console.error('Silent verification failed, keeping cached status:', err);
+        // On network failure, keep the cached status instead of downgrading
       }
 
       // 3. Fetch real-time quota from server (non-blocking, updates dashboard reactively)
@@ -569,7 +637,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnFbLogin.disabled = false;
     btnFbLogin.textContent = 'دخول 🔥';
 
-    if (res.success && res.isPro) {
+    if (res.needsVerification) {
+      // ── Email not verified — show resend option ──
+      proMessage.innerHTML = `⚠️ بريدك <strong>${res.email}</strong> غير موثق. تفقد بريدك واضغط رابط التحقق ثم سجل دخول مرة أخرى.<br><button id="btn-resend-verify" style="margin-top:8px;padding:6px 16px;border:none;border-radius:6px;background:#6C5CE7;color:#fff;cursor:pointer;font-size:13px;">📧 إعادة إرسال رسالة التحقق</button>`;
+      proMessage.className = 'pro-message error';
+      // Attach resend handler
+      document.getElementById('btn-resend-verify')?.addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = 'جاري الإرسال...';
+        const resendRes = await resendVerificationEmail();
+        if (resendRes.success) {
+          e.target.textContent = '✅ تم الإرسال! تفقد بريدك';
+        } else {
+          e.target.textContent = resendRes.error || 'فشل الإرسال';
+          e.target.disabled = false;
+        }
+      });
+    } else if (res.success && res.isPro) {
       updateProUI(true, email, res.plan || 'pro');
       proMessage.textContent = `🎉 مرحباً! تم تسجيل الدخول وتفعيل اشتراك PANDA Pro بنجاح!`;
       proMessage.className = 'pro-message success';
@@ -607,9 +691,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     btnFbSignup.disabled = false;
     btnFbSignup.textContent = 'حساب جديد ➕';
 
-    if (res.success) {
+    if (res.success && res.needsVerification) {
+      proMessage.innerHTML = `🎉 تم إنشاء حسابك! تم إرسال رسالة تحقق إلى <strong>${email}</strong>.<br>افتح بريدك واضغط رابط التحقق، ثم سجل دخول 🔐`;
+      proMessage.className = 'pro-message success';
+    } else if (res.success) {
       updateProUI(false, email);
-      proMessage.textContent = `🎉 تم إنشاء حسابك بنجاح بالبريد: ${email}! اختر اشتراك شهر أو سنة أدناه للترقية.`;
+      proMessage.textContent = `🎉 تم إنشاء حسابك بنجاح!`;
       proMessage.className = 'pro-message success';
     } else {
       proMessage.textContent = res.error || 'تعذر إنشاء الحساب';

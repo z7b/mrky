@@ -59,7 +59,16 @@ export async function checkFirebaseProStatus(email) {
     return { isPro: false, plan: 'free', email: cleanEmail };
   } catch (err) {
     console.error('[PANDA Pro Check] Error verifying profile status:', err);
-    return { isPro: false, plan: 'free', email: cleanEmail };
+    // On network failure, fall back to cached status instead of forcing free
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['isPremium', 'plan'], (cached) => {
+        resolve({
+          isPro: Boolean(cached.isPremium),
+          plan: cached.plan || 'free',
+          email: cleanEmail
+        });
+      });
+    });
   }
 }
 
@@ -110,20 +119,71 @@ export async function signInWithFirebaseEmailPassword(email, password) {
       };
     }
 
-    const proStatus = await checkFirebaseProStatus(cleanEmail);
+    // ── Step 1: Check email verification status ──
+    let emailVerified = false;
+    try {
+      const lookupRes = await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ idToken: data.idToken })
+        }
+      );
+      const lookupData = await lookupRes.json();
+      emailVerified = lookupData.users?.[0]?.emailVerified === true;
+    } catch {
+      // If lookup fails, allow login but flag as unverified
+    }
+
+    // ── Block login if email is NOT verified ──
+    if (!emailVerified) {
+      // Save token temporarily so resend verification can work
+      await chrome.storage.local.set({
+        pendingVerificationEmail: cleanEmail,
+        pendingVerificationToken: data.idToken
+      });
+      return {
+        success: false,
+        error: 'EMAIL_NOT_VERIFIED',
+        email: cleanEmail,
+        needsVerification: true
+      };
+    }
+
+    // ── Step 2: Save tokens (email is verified) ──
     await chrome.storage.local.set({
       userEmail: cleanEmail,
       firebaseToken: data.idToken,
       firebaseRefreshToken: data.refreshToken,
       firebaseTokenExpiry: Date.now() + (parseInt(data.expiresIn, 10) * 1000),
-      isPremium: proStatus.isPro
+      emailVerified: true
     });
+
+    // ── Step 3: Quick inline check (non-blocking for UI, but we await for initial result) ──
+    let isPro = false;
+    let plan = 'free';
+    try {
+      const proStatus = await checkFirebaseProStatus(cleanEmail);
+      isPro = proStatus.isPro;
+      plan = proStatus.plan || 'free';
+      await chrome.storage.local.set({ isPremium: isPro, plan });
+    } catch {
+      // If initial check fails, that's OK — background retries will handle it
+    }
+
+    // ── Step 4: Schedule background verification (covers Edge Function cold start / failures) ──
+    chrome.runtime.sendMessage({
+      type: 'SCHEDULE_SUBSCRIPTION_CHECK',
+      payload: { email: cleanEmail }
+    }).catch(() => {});
 
     return {
       success: true,
       email: cleanEmail,
-      isPro: proStatus.isPro,
-      plan: proStatus.plan
+      isPro,
+      plan,
+      emailVerified: true
     };
   } catch (err) {
     console.error('[PANDA Firebase] Sign in error:', err);
@@ -168,24 +228,88 @@ export async function signUpWithFirebaseEmailPassword(email, password) {
       return { success: false, error: 'تعذر إنشاء الحساب: ' + msg };
     }
 
+    // ── Send email verification automatically ──
+    try {
+      await fetch(
+        `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${firebaseConfig.apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            requestType: 'VERIFY_EMAIL',
+            idToken: data.idToken
+          })
+        }
+      );
+      console.log('[PANDA Firebase] ✅ Verification email sent to', cleanEmail);
+    } catch {
+      console.warn('[PANDA Firebase] ⚠️ Could not send verification email');
+    }
+
     await chrome.storage.local.set({
       userEmail: cleanEmail,
       firebaseToken: data.idToken,
       firebaseRefreshToken: data.refreshToken,
       firebaseTokenExpiry: Date.now() + (parseInt(data.expiresIn, 10) * 1000),
       isPremium: false,
-      plan: 'free'
+      plan: 'free',
+      emailVerified: false
     });
 
     return {
       success: true,
       email: cleanEmail,
       isPro: false,
-      plan: 'free'
+      plan: 'free',
+      emailVerified: false,
+      needsVerification: true
     };
   } catch (err) {
     console.error('[PANDA Firebase] Sign up error:', err);
     return { success: false, error: 'حدث خطأ في الاتصال بسحابة Firebase' };
+  }
+}
+
+/**
+ * Resend email verification for unverified accounts.
+ * Uses the pending token saved during blocked login.
+ * @returns {Promise<{success: boolean, error?: string}>}
+ */
+export async function resendVerificationEmail() {
+  const stored = await chrome.storage.local.get(['pendingVerificationEmail', 'pendingVerificationToken']);
+  const token = stored.pendingVerificationToken;
+  const email = stored.pendingVerificationEmail;
+
+  if (!token || !email) {
+    return { success: false, error: 'لا يوجد حساب بحاجة للتحقق' };
+  }
+
+  try {
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${firebaseConfig.apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestType: 'VERIFY_EMAIL',
+          idToken: token
+        })
+      }
+    );
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      // Token may have expired — user needs to try logging in again
+      const msg = data.error?.message || '';
+      if (msg.includes('INVALID_ID_TOKEN') || msg.includes('TOKEN_EXPIRED')) {
+        return { success: false, error: 'انتهت الجلسة. أعد تسجيل الدخول ثم اضغط إعادة إرسال.' };
+      }
+      return { success: false, error: 'تعذر إرسال رسالة التحقق' };
+    }
+    console.log('[PANDA Firebase] ✅ Verification email re-sent to', email);
+    return { success: true, email };
+  } catch (err) {
+    console.error('[PANDA Firebase] Resend verification error:', err);
+    return { success: false, error: 'حدث خطأ في الاتصال' };
   }
 }
 

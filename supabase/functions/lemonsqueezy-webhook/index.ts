@@ -59,10 +59,9 @@ serve(async (req) => {
     const attrs = payload.data?.attributes || {};
     const variantId = (attrs.variant_id ?? attrs.first_order_item?.variant_id)?.toString() || '';
 
-    // ⚠️ تنبيه هام: يجب استبدال المعرفات الرقمية أدناه (Integers) بالقيم الفعلية من لوحة تحكم ليمون سكويزي للمتغيرات (Variants) الخاصة بـ PANDA Pro
     const PLAN_BY_VARIANT: Record<string, string> = {
-      '1214334': 'monthly', // باقة PANDA Pro الشهرية
-      '1214317': 'annual'   // باقة PANDA Pro السنوية
+      '1898671': 'monthly', // باقة PANDA Pro الشهرية الفعلية
+      '1898645': 'annual'   // باقة PANDA Pro السنوية الفعلية
     };
 
     const planName = PLAN_BY_VARIANT[variantId];

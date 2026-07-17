@@ -27,6 +27,11 @@ export const LEMON_SQUEEZY_MONTHLY_URL = 'https://enpanda.lemonsqueezy.com/check
  * @returns {Promise<{allowed: boolean, count?: number, is_pro?: boolean, error?: string}>}
  */
 export async function incrementUsageOnServer(type) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    // Fail-open immediately if offline without logging a warning/error
+    return { allowed: true, error: 'offline_mode' };
+  }
+
   // Get a valid (auto-refreshed) Firebase ID token
   const token = await getValidFirebaseToken();
   if (!token) {
@@ -48,23 +53,15 @@ export async function incrementUsageOnServer(type) {
       }
     );
   } catch (err) {
-    // ⚠️ TRIPWIRE — SECURITY ASSUMPTION ⚠️
-    // Fail-open is safe ONLY because word-save and grammar-explain features are 100% local
-    // (IndexedDB + rule-based engine) with ZERO external API cost.
-    //
-    // If ANY future feature calls a paid API (LLM, TTS, cloud OCR, etc.), enforcement MUST
-    // move to the Edge Function itself: verify quota server-side BEFORE calling the provider.
-    // The Edge Function already has the verified email — add the provider call there.
-    //
     // Changing this catch block to fail-closed would break offline users. Changing the
     // architecture to server-side enforcement is the correct path for paid features.
-    console.warn('[PANDA Network] Offline or DNS failure — failing open:', err.message);
+    console.log('[PANDA Network] Offline or DNS failure — failing open:', err.message);
     return { allowed: true, error: 'network_fallback' };
   }
 
   // ── Server responded — respect its decision (Fail-Closed) ──
   if (!response.ok) {
-    console.error(`[PANDA Security] Server rejected usage check: HTTP ${response.status}`);
+    console.log(`[PANDA Security] Server rejected usage check: HTTP ${response.status}`);
     return { allowed: false, error: `server_rejected_${response.status}` };
   }
 
@@ -81,7 +78,7 @@ export async function incrementUsageOnServer(type) {
     }
     return data;
   } catch (err) {
-    console.error('[PANDA Security] Malformed response body:', err);
+    console.log('[PANDA Security] Malformed response body:', err);
     return { allowed: false, error: 'malformed_response' };
   }
 }
@@ -97,6 +94,10 @@ export async function incrementUsageOnServer(type) {
  * @returns {Promise<{is_pro: boolean, word_count: number, explain_count: number, limit: number} | null>}
  */
 export async function fetchDailyUsageFromServer() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return null;
+  }
+
   const token = await getValidFirebaseToken();
   if (!token) return null;
 
@@ -115,7 +116,7 @@ export async function fetchDailyUsageFromServer() {
     );
 
     if (!response.ok) {
-      console.warn('[PANDA Status] Server returned:', response.status);
+      console.log('[PANDA Status] Server returned:', response.status);
       return null;
     }
 
@@ -134,7 +135,7 @@ export async function fetchDailyUsageFromServer() {
 
     return data;
   } catch (err) {
-    console.warn('[PANDA Status] Network error fetching usage:', err.message);
+    console.log('[PANDA Status] Network error fetching usage:', err.message);
     return null;
   }
 }
@@ -156,11 +157,33 @@ export async function fetchDailyUsageFromServer() {
 export async function checkUserProfileByEmail(email) {
   if (!email) return { isPro: false, plan: 'free', email: '' };
 
+  // Helper: read cached status from chrome.storage.local
+  async function getCachedStatus() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['isPremium', 'plan'], (cached) => {
+        resolve({
+          isPro: Boolean(cached.isPremium),
+          plan: cached.plan || 'free',
+          email,
+          fromCache: true
+        });
+      });
+    });
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return await getCachedStatus();
+  }
+
   try {
     const token = await getValidFirebaseToken();
     if (!token) {
-      return { isPro: false, plan: 'free', email };
+      // No token = not logged in; return cached status instead of forcing free
+      return await getCachedStatus();
     }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000); // 8s timeout
 
     const response = await fetch(
       `${SUPABASE_URL}/functions/v1/increment-usage`,
@@ -172,10 +195,16 @@ export async function checkUserProfileByEmail(email) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ p_type: 'status' }),
+        signal: controller.signal,
       }
     );
 
-    if (!response.ok) return { isPro: false, plan: 'free', email };
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      console.log(`[PANDA Security] Profile check HTTP ${response.status} — falling back to cache`);
+      return await getCachedStatus();
+    }
 
     const data = await response.json();
     const isPro = Boolean(data.is_pro);
@@ -189,8 +218,8 @@ export async function checkUserProfileByEmail(email) {
 
     return { isPro, plan, email };
   } catch (err) {
-    console.warn('[PANDA Security] Profile check via Edge Function failed:', err.message);
-    return { isPro: false, plan: 'free', email };
+    console.log('[PANDA Security] Profile check via Edge Function failed:', err.message, '— falling back to cache');
+    return await getCachedStatus();
   }
 }
 
@@ -206,6 +235,10 @@ export async function verifyLicenseKey(licenseKey) {
 
   const cleanKey = licenseKey.trim();
 
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { valid: false, error: 'أنت غير متصل بالإنترنت. يرجى التحقق من الشبكة.' };
+  }
+
   try {
     const response = await fetch(
       `${SUPABASE_URL}/rest/v1/licenses?key=eq.${encodeURIComponent(cleanKey)}&select=id,key,is_active,plan,expires_at`,
@@ -220,7 +253,7 @@ export async function verifyLicenseKey(licenseKey) {
     );
 
     if (!response.ok) {
-      console.error('[Mrky Supabase] Error HTTP status:', response.status);
+      console.log('[Mrky Supabase] Error HTTP status:', response.status);
       return { valid: false, error: 'تعذر الاتصال بقاعدة بيانات التحقق' };
     }
 
@@ -247,7 +280,7 @@ export async function verifyLicenseKey(licenseKey) {
       expiresAt: license.expires_at
     };
   } catch (err) {
-    console.error('[Mrky Supabase] Network error verifying license:', err);
+    console.log('[Mrky Supabase] Network error verifying license:', err);
     return { valid: false, error: 'خطأ في الاتصال بالشبكة' };
   }
 }
