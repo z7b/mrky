@@ -119,7 +119,7 @@
           </div>
         </div>
         <div class="pro-bar-right">
-          <span class="pro-status-tag" id="pro-status-tag">نسخة مجانية</span>
+          <span class="pro-status-tag mrky-skeleton" id="pro-status-tag">...</span>
           <span class="pro-chevron" id="pro-chevron">▼</span>
         </div>
       </div>
@@ -223,11 +223,11 @@
     <!-- Hero Stats -->
     <section class="stats-hero">
       <div class="stat-card">
-        <span class="stat-val" id="stat-cards-count">0</span>
+        <span class="stat-val mrky-skeleton" id="stat-cards-count">—</span>
         <span class="stat-label">كلمة محفوظة</span>
       </div>
       <div class="stat-card">
-        <span class="stat-val" id="stat-known-count">0</span>
+        <span class="stat-val mrky-skeleton" id="stat-known-count">—</span>
         <span class="stat-label">كلمة معروفة</span>
       </div>
     </section>
@@ -237,7 +237,7 @@
       <div class="action-box">
         <div class="action-info">
           <h3>جلسة المراجعة اليومية</h3>
-          <p><span id="due-count">0</span> كلمات جاهزة للمراجعة بالتكرار المتباعد</p>
+          <p><span id="due-count" class="mrky-skeleton">—</span> كلمات جاهزة للمراجعة بالتكرار المتباعد</p>
         </div>
         <div class="action-buttons-group">
           <button id="btn-start-review" class="btn-primary" disabled>ابدأ المراجعة</button>
@@ -252,9 +252,9 @@
         <h2>الكلمات المضافة حديثاً</h2>
       </div>
       <div class="words-list" id="words-list">
-        <div class="empty-state">
-          <span class="empty-icon">📝</span>
-          <p>لم تحفظ أي كلمات بعد. ابدأ بمشاهدة يوتيوب واحفظ كلماتك الأولى!</p>
+        <div class="empty-state mrky-skeleton" id="words-list-loading">
+          <span class="empty-icon">🐼</span>
+          <p>جاري التحميل...</p>
         </div>
       </div>
     </section>

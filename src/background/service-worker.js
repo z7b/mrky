@@ -14,7 +14,7 @@ import { getValidFirebaseToken } from '../shared/firebase.js';
 // Security: Only these db methods can be invoked via the DB_PROXY message.
 // Prevents arbitrary method execution from content scripts or compromised pages.
 const ALLOWED_DB_METHODS = [
-  'addCard', 'getAllCards', 'getDueCards', 'reviewCard', 'deleteCard',
+  'addCard', 'updateCardScreenshot', 'isCardExists', 'getAllCards', 'getDueCards', 'reviewCard', 'deleteCard',
   'getCardCount', 'markAsKnown', 'isKnown', 'getKnownWordsSet',
   'getKnownWordCount', 'getSetting', 'setSetting',
 ];
@@ -27,7 +27,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true; // Keep channel open for async response
 
     case 'CAPTURE_SCREENSHOT':
-      handleScreenshot(sender.tab?.id, sendResponse);
+      handleScreenshot(sender.tab?.windowId, sendResponse);
       return true;
 
     case 'RUN_OCR':
@@ -116,9 +116,9 @@ async function handleTranslation(payload, sendResponse) {
  * @param {number} tabId
  * @param {Function} sendResponse
  */
-async function handleScreenshot(tabId, sendResponse) {
+async function handleScreenshot(windowId, sendResponse) {
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, {
+    const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
       format: 'png',
       quality: 90,
     });

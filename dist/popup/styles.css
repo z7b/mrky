@@ -610,6 +610,12 @@ body {
   50% { opacity: 0.6; }
 }
 
+/* ─── Loading Skeleton (initial popup open, before real data arrives) ─── */
+.mrky-skeleton {
+  animation: pulse 1.2s ease-in-out infinite;
+  opacity: 0.55;
+}
+
 /* ─── Toggle Actions Row ─── */
 .toggle-actions-row {
   display: flex;

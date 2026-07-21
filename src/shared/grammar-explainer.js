@@ -17,6 +17,82 @@
 import nlp from 'compromise';
 
 // ══════════════════════════════════════════════════
+// 0. Sanitizer for AI-generated explanation HTML
+// ══════════════════════════════════════════════════
+// Note: DOMPurify was intentionally NOT used here. The AI explanation output
+// only ever needs 4 CSS classes — a hand-rolled allowlist sanitizer is smaller,
+// auditable in one screen, and avoids pulling ~60 KB into the content script
+// bundle for a use case this narrow. If the allowlist grows significantly,
+// consider switching to DOMPurify.
+// getSmartExplanation() below asks an LLM (on-device Gemini Nano) to return
+// raw HTML, built from `word`/`sentence` that come from THIRD-PARTY WEBPAGE
+// TEXT (subtitles, articles) — not from the user. That HTML is later injected
+// via innerHTML. A page could contain text crafted to make the model emit
+// something other than the four expected divs (e.g. an event-handler
+// attribute), so the output is walked through a strict allowlist before it
+// is ever allowed near innerHTML. This is intentionally narrow — the prompt
+// only ever needs these four div classes — rather than a general-purpose
+// sanitizer, so the whole thing stays small enough to read in one pass.
+const EXPLAIN_ALLOWED_CLASSES = new Set([
+  'mrky-explain-section',
+  'mrky-explain-title',
+  'mrky-explain-role',
+  'mrky-explain-context',
+]);
+const EXPLAIN_DROPPED_TAGS = new Set([
+  'script', 'style', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form', 'svg',
+]);
+
+/**
+ * Rebuild `rawHtml` from scratch keeping only <div>/<span> tags with an
+ * allowlisted class, and plain text. No attribute other than a whitelisted
+ * `class` value is ever copied — no href, src, style, or event-handler attributes.
+ * Anything not on the allowlist (script tags, unknown elements) is dropped
+ * or unwrapped to its text only.
+ */
+function sanitizeExplanationHtml(rawHtml) {
+  try {
+    const parsed = new DOMParser().parseFromString(String(rawHtml || ''), 'text/html');
+    const output = document.createElement('div');
+
+    const walk = (sourceNode, targetParent) => {
+      for (const child of Array.from(sourceNode.childNodes)) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          targetParent.appendChild(document.createTextNode(child.textContent));
+          continue;
+        }
+        if (child.nodeType !== Node.ELEMENT_NODE) continue; // drop comments etc.
+
+        const tag = child.tagName.toLowerCase();
+        if (EXPLAIN_DROPPED_TAGS.has(tag)) continue; // drop entirely, don't even read its text
+
+        if (tag !== 'div' && tag !== 'span') {
+          walk(child, targetParent); // unknown-but-harmless tag: unwrap, keep children
+          continue;
+        }
+
+        const el = document.createElement(tag);
+        const cls = (child.getAttribute('class') || '').trim();
+        if (EXPLAIN_ALLOWED_CLASSES.has(cls)) el.className = cls;
+        // No other attribute is ever copied.
+        targetParent.appendChild(el);
+        walk(child, el);
+      }
+    };
+
+    walk(parsed.body, output);
+    return output.innerHTML;
+  } catch (err) {
+    console.warn('[PANDA] Explanation sanitization failed, showing plain text instead:', err);
+    // Fail closed: if anything about parsing goes wrong, never fall back to
+    // the raw (unsanitized) string — show it as inert text instead.
+    const safe = document.createElement('div');
+    safe.textContent = String(rawHtml || '');
+    return safe.innerHTML;
+  }
+}
+
+// ══════════════════════════════════════════════════
 // 1. القواعد النحوية الأساسية (Grammar Rules)
 // ══════════════════════════════════════════════════
 
@@ -135,6 +211,111 @@ const PHRASAL_VERBS = {
   'turn up':     'يظهر / يرفع الصوت.',
   'work out':    'يتمرّن / يجد حلاً / ينجح.',
   'wrap up':     'يُنهي / يختتم.',
+
+  // ─── توسعة v3 — أفعال مركبة إضافية ───
+  'ask out':      'يدعو شخصاً للخروج في موعد غرامي.',
+  'back up':      'يدعم / يأخذ نسخة احتياطية.',
+  'blow up':      'ينفجر / يغضب بشدة.',
+  'bring about':  'يتسبب في حدوث شيء.',
+  'bring back':   'يعيد شيئاً / يذكّر بـ.',
+  'bring down':   'يُسقط / يخفّض.',
+  'bring out':    'يُصدر / يُبرز.',
+  'burn out':     'يُنهك تماماً (جسدياً أو نفسياً).',
+  'call back':    'يعاود الاتصال.',
+  'call on':      'يطلب من شخص / يزور.',
+  'calm down':    'يهدأ.',
+  'catch up':     'يلحق بـ / يتدارك ما فاته.',
+  'clean up':     'ينظّف.',
+  'come back':    'يعود.',
+  'come down with': 'يُصاب بمرض (عادة بسيط).',
+  'come in':      'يدخل.',
+  'come out':     'يظهر / يُنشر (كتاب، فيلم).',
+  'count on':     'يعتمد على.',
+  'cut down':     'يقلّل من شيء.',
+  'deal with':    'يتعامل مع.',
+  'do without':   'يستغني عن.',
+  'drop by':      'يمرّ سريعاً على مكان.',
+  'drop off':     'يوصل شخصاً إلى مكان / ينخفض.',
+  'drop out':     'ينسحب / يترك الدراسة.',
+  'eat out':      'يأكل في مطعم خارج المنزل.',
+  'end up':       'ينتهي به الأمر إلى.',
+  'fall apart':   'يتفكك / ينهار.',
+  'fall behind':  'يتأخر عن الركب.',
+  'fall for':     'يقع في حب / ينخدع بـ.',
+  'get back':     'يعود / يسترجع شيئاً.',
+  'get by':       'يتدبر أمره بصعوبة.',
+  'get in':       'يدخل.',
+  'get off':      'ينزل من (حافلة/قطار) / يغادر العمل.',
+  'get on':       'يصعد إلى (حافلة/قطار) / ينسجم مع شخص.',
+  'get out':      'يخرج.',
+  'get through':  'ينجو من موقف صعب / يكمل شيئاً شاقاً.',
+  'get together': 'يجتمع مع آخرين.',
+  'give away':    'يهدي مجاناً / يفضح سراً.',
+  'give back':    'يعيد شيئاً لصاحبه.',
+  'give out':     'يوزّع / ينفد (طاقة، إمدادات).',
+  'go ahead':     'يمضي قدماً / يبدأ.',
+  'go away':      'يرحل / يبتعد.',
+  'go back':      'يعود.',
+  'go off':       'ينطلق (إنذار/سلاح) / ينفجر.',
+  'go through':   'يمر بتجربة صعبة / يفحص بدقة.',
+  'hang out':     'يقضي وقتاً مع أصدقاء.',
+  'hang up':      'يُنهي مكالمة هاتفية.',
+  'hold back':    'يتردد / يمنع نفسه أو غيره.',
+  'hold off':     'يؤجّل شيئاً.',
+  'hold up':      'يؤخر شيئاً / يسرق بالتهديد.',
+  'keep away':    'يبتعد عن.',
+  'keep off':     'يبتعد عن / يتجنب.',
+  'let in':       'يسمح بالدخول.',
+  'let out':      'يُطلق / يُخرج.',
+  'log in':       'يسجّل الدخول (نظام إلكتروني).',
+  'log on':       'يسجّل الدخول (نظام إلكتروني).',
+  'log off':      'يسجّل الخروج (نظام إلكتروني).',
+  'log out':      'يسجّل الخروج (نظام إلكتروني).',
+  'look down on': 'يحتقر / ينظر بدونية إلى.',
+  'look out':     'ينتبه / يحترس.',
+  'look over':    'يراجع بسرعة.',
+  'make out':     'يميّز شيئاً بصعوبة / يفهم.',
+  'mix up':       'يخلط بين أشياء.',
+  'opt in':       'يختار المشاركة أو الانضمام طوعاً.',
+  'opt out':      'ينسحب / يختار عدم المشاركة.',
+  'pass on':      'ينقل معلومة / يتوفى (تعبير مهذب).',
+  'pay back':     'يسدد ديناً.',
+  'pay off':      'يُثمر جهده / يسدد ديناً بالكامل.',
+  'pick out':     'يختار من بين مجموعة.',
+  'put away':     'يضع الشيء في مكانه المخصص.',
+  'put back':     'يعيد شيئاً إلى مكانه.',
+  'put down':     'يضع الشيء أرضاً / ينتقد شخصاً.',
+  'put forward':  'يقترح فكرة.',
+  'put together': 'يجمّع / يُركّب.',
+  'run away':     'يهرب.',
+  'run by':       'يعرض فكرة على شخص ليأخذ رأيه.',
+  'run over':     'يدهس شيئاً بسيارة.',
+  'set off':      'ينطلق في رحلة / يتسبب في حدوث شيء.',
+  'set out':      'يبدأ رحلة أو مهمة.',
+  'settle down':  'يستقر (في مكان أو حياة).',
+  'show off':     'يتباهى.',
+  'single out':   'يخص بالذكر / يميّز عن الباقي.',
+  'sort through': 'يفرز / يفحص مجموعة أشياء.',
+  'speak up':     'يتكلم بصوت أعلى / يجاهر برأيه.',
+  'stand by':     'يقف بجانب شخص / يستعد.',
+  'stand up':     'يقف على قدميه.',
+  'stay up':      'يسهر.',
+  'step down':    'يتنحى عن منصب.',
+  'step up':      'يتقدّم / يرفع مستوى جهده.',
+  'stick to':     'يلتزم بشيء ولا يحيد عنه.',
+  'switch off':   'يطفئ جهازاً.',
+  'switch on':    'يشغّل جهازاً.',
+  'take back':    'يسترجع كلامه / يعيد شيئاً.',
+  'take down':    'يزيل شيئاً / يدوّن ملاحظة.',
+  'talk over':    'يناقش موضوعاً بعمق.',
+  'think over':   'يفكّر مليّاً بشيء قبل اتخاذ قرار.',
+  'try on':       'يجرّب ملابس قبل الشراء.',
+  'try out':      'يختبر شيئاً جديداً.',
+  'wake up':      'يستيقظ.',
+  'watch out':    'ينتبه / يحترس.',
+  'wear off':     'يزول تأثيره تدريجياً.',
+  'work on':      'يعمل على تطوير أو تحسين شيء.',
+  'write down':   'يدوّن / يكتب ملاحظة.',
 };
 
 // ══════════════════════════════════════════════════
@@ -167,6 +348,30 @@ const IDIOMS = {
   'stab in the back':  '⚠️ تعبير اصطلاحي: يطعن في الظهر / يخون.',
   'time flies':        '⚠️ تعبير اصطلاحي: الوقت يمر بسرعة.',
   'wrap your head':    '⚠️ تعبير اصطلاحي: يفهم / يستوعب شيئاً صعباً.',
+
+  // ─── توسعة v3 — تعبيرات اصطلاحية إضافية ───
+  'ballpark figure':   '⚠️ تعبير اصطلاحي: تقدير تقريبي غير دقيق.',
+  'the elephant in the room': '⚠️ تعبير اصطلاحي: مشكلة واضحة يتجاهلها الجميع عمداً.',
+  'get cold feet':     '⚠️ تعبير اصطلاحي: يتراجع بسبب الخوف قبل فعل شيء.',
+  'hit the nail on the head': '⚠️ تعبير اصطلاحي: يصيب الهدف بدقة (يقول الحقيقة بالضبط).',
+  'let sleeping dogs lie': '⚠️ تعبير اصطلاحي: لا تُثر مشكلة هادئة قد تسبب متاعب.',
+  'on thin ice':       '⚠️ تعبير اصطلاحي: في موقف خطر أو حساس.',
+  'out of the blue':   '⚠️ تعبير اصطلاحي: فجأة ودون سابق إنذار.',
+  'the ball is in your court': '⚠️ تعبير اصطلاحي: القرار الآن بيدك.',
+  'under the radar':   '⚠️ تعبير اصطلاحي: دون أن يلاحظه أحد.',
+  'a dime a dozen':    '⚠️ تعبير اصطلاحي: شيء شائع جداً وغير ثمين.',
+  'add insult to injury': '⚠️ تعبير اصطلاحي: يزيد الطين بلة.',
+  'back to square one': '⚠️ تعبير اصطلاحي: يعود لنقطة الصفر.',
+  'barking up the wrong tree': '⚠️ تعبير اصطلاحي: يوجّه اتهامه أو جهده بالاتجاه الخاطئ.',
+  'best of both worlds': '⚠️ تعبير اصطلاحي: أفضل ما في الأمرين معاً.',
+  'bite off more than you can chew': '⚠️ تعبير اصطلاحي: يتحمّل أكثر مما يستطيع.',
+  'cut corners':       '⚠️ تعبير اصطلاحي: يختصر الطريق على حساب الجودة.',
+  'go the extra mile': '⚠️ تعبير اصطلاحي: يبذل جهداً إضافياً يفوق المتوقع.',
+  'hit the sack':      '⚠️ تعبير اصطلاحي: يذهب للنوم.',
+  'in the same boat':  '⚠️ تعبير اصطلاحي: في نفس الموقف الصعب مع آخرين.',
+  'jump on the bandwagon': '⚠️ تعبير اصطلاحي: ينضم إلى موضة أو اتجاه رائج.',
+  'keep an eye on':    '⚠️ تعبير اصطلاحي: يراقب شيئاً أو شخصاً عن كثب.',
+  'costs an arm and a leg': '⚠️ تعبير اصطلاحي: مكلّف جداً.',
 };
 
 // ══════════════════════════════════════════════════
@@ -667,7 +872,7 @@ export async function getSmartExplanation(word, sentence) {
       else if (cleanHtml.startsWith('```')) cleanHtml = cleanHtml.substring(3);
       if (cleanHtml.endsWith('```'))
         cleanHtml = cleanHtml.substring(0, cleanHtml.length - 3);
-      return cleanHtml.trim();
+      return sanitizeExplanationHtml(cleanHtml.trim());
     }
   } catch (err) {
     console.warn(

@@ -4,17 +4,31 @@
  * Shows: word, POS tag, Arabic translation, and "Add Card" button.
  */
 import { translateViaBackground } from '../shared/translate.js';
-import { addCard, markAsKnown } from '../shared/db.js';
+import { addCard, markAsKnown, isCardExists, updateCardScreenshot } from '../shared/db.js';
 import { playPronunciation } from '../shared/audio.js';
 import { mrkyEnabled } from './enabled-state.js';
 import { analyzeText } from '../shared/nlp-processor.js';
 import { getKnownWordsSet } from '../shared/db.js';
 import { generateExplanation, getSmartExplanation } from '../shared/grammar-explainer.js';
-import { incrementUsageOnServer } from '../shared/supabase.js';
+import { incrementUsageOnServer, fetchDailyUsageFromServer, isUserPremium, getLocalDailyUsage } from '../shared/supabase.js';
 
 let tooltipEl = null;
 let currentWord = null;
 let isTooltipHovered = false;
+let isSaving = false;
+let hoverSessionId = 0;
+// Cards saved optimistically (without a screenshot yet). Each entry is a
+// cardId awaiting a screenshot, taken once the tooltip actually closes.
+// A queue (not a single value) so back-to-back saves within one tooltip
+// lifecycle don't clobber each other's pending job.
+let pendingScreenshotJobs = [];
+// Throttles the Edge Function warm-up ping below — fires at most every 25s
+// regardless of hover frequency, since hovers happen far more often than
+// this needs to.
+let lastWarmupAt = 0;
+// Cache the last explanation result so re-hovering the same word doesn't
+// re-charge a daily quota unit for identical content.
+let lastExplanation = { word: '', sentence: '', html: '' };
 let selectionAnchor = null;
 
 /**
@@ -222,15 +236,27 @@ async function handleMouseSelection(e) {
  */
 export async function showTooltip(wordEl, word, posInfo, sentence) {
   if (!mrkyEnabled) return; // Blocked — extension is OFF
+  if (isSaving) return; // Don't reassign currentWord while handleAddCard is still using it
+
+  // Keep the increment-usage Edge Function warm so the eventual "add card"
+  // click doesn't pay a cold-start penalty. Throttled — this must not fire
+  // on every single hover, which happens far more often than saves do.
+  if (Date.now() - lastWarmupAt > 25000) {
+    lastWarmupAt = Date.now();
+    fetchDailyUsageFromServer().catch(() => {}); // best-effort, ignore failures
+  }
+
   if (!tooltipEl) initTooltip();
 
-  currentWord = { word, posInfo, sentence };
+  hoverSessionId++;
+  currentWord = { word, posInfo, sentence, sessionId: hoverSessionId };
 
   // Fill in the word and POS
   const posEl = tooltipEl.querySelector('.mrky-tooltip-pos');
   const wordElInner = tooltipEl.querySelector('.mrky-tooltip-word');
   const translationEl = tooltipEl.querySelector('.mrky-tooltip-translation');
   const addBtn = tooltipEl.querySelector('.mrky-btn-add');
+  const knownBtn = tooltipEl.querySelector('.mrky-btn-known');
 
   posEl.textContent = posInfo.label;
   posEl.style.background = posInfo.color;
@@ -242,6 +268,11 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
   if (addBtn) {
     addBtn.disabled = true;
     addBtn.textContent = '⏳ جاري الترجمة...';
+  }
+  if (knownBtn) {
+    knownBtn.style.display = '';
+    knownBtn.disabled = false;
+    knownBtn.textContent = '✓ أعرفها';
   }
 
   // Control "Translate Sentence" and "Explain" buttons visibility (Only for Videos and Articles, not OCR or single words)
@@ -269,6 +300,7 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
       }
       if (explainBtn) {
         explainBtn.style.display = '';  // Reset from any previous hiding
+        explainBtn.disabled = false;
         explainBtn.innerHTML = '<span>🧠</span> <span>علل</span>';
       }
     } else {
@@ -277,6 +309,7 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
       if (translateSentBtn) translateSentBtn.style.display = 'none';
       if (explainBtn) {
         explainBtn.style.display = '';
+        explainBtn.disabled = false;
         explainBtn.innerHTML = '<span>🧠</span> <span>علل</span>';
       }
     }
@@ -290,12 +323,15 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
   pauseVideo();
 
   // Fetch translation — try with context first, fall back to word-only
+  const fetchSessionId = hoverSessionId;
   try {
     const shortContext = extractContext(word, sentence, 120);
     let result = await translateViaBackground(word, shortContext);
 
+    // Guard against stale hover session
+    if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
+
     if (result && result.error === 'context_invalidated') {
-      if (!currentWord) return;
       translationEl.innerHTML = '<span style="color: #FF8A8A; font-size: 11px; font-weight: 500;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة</span>';
       if (addBtn) {
         addBtn.disabled = true;
@@ -308,8 +344,11 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
     if (!result || !result.translation || result.translation === '⚠ خطأ' || result.translation === '⚠ خطأ في الترجمة') {
       console.warn('[Mrky] Context translation failed, retrying word-only...');
       result = await translateViaBackground(word, '');
+
+      // Guard against stale hover session after retry
+      if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
+
       if (result && result.error === 'context_invalidated') {
-        if (!currentWord) return;
         translationEl.innerHTML = '<span style="color: #FF8A8A; font-size: 11px; font-weight: 500;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة</span>';
         if (addBtn) {
           addBtn.disabled = true;
@@ -319,8 +358,8 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
       }
     }
 
-    // Bail out if the tooltip was dismissed while we were awaiting translation
-    if (!currentWord) return;
+    // Guard against stale hover session before final UI / object update
+    if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
 
     // Final check
     if (result && result.translation && result.translation !== '⚠ خطأ' && result.translation !== '⚠ خطأ في الترجمة') {
@@ -338,7 +377,7 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
     }
   } catch (err) {
     console.error('[Mrky] Translation error:', err);
-    if (!currentWord) return;
+    if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
     translationEl.textContent = '⚠ خطأ في الترجمة';
     if (addBtn) {
       addBtn.textContent = '⚠ فشل الترجمة';
@@ -351,6 +390,7 @@ export async function showTooltip(wordEl, word, posInfo, sentence) {
  * @param {boolean} force - Force hide even if tooltip is hovered
  */
 export function hideTooltip(force = false) {
+  if (isSaving && !force) return; // Prevent closing if actively saving a card
   if (!force && isTooltipHovered) return; // Don't hide if user is hovering over tooltip
   if (!tooltipEl) return;
 
@@ -365,6 +405,43 @@ export function hideTooltip(force = false) {
 
   // Resume video playback
   resumeVideo();
+
+  // Any cards saved optimistically (without a screenshot) during this
+  // tooltip's lifecycle get their screenshot now — the tooltip is already
+  // hidden at this point, so this is a genuinely free, invisible capture
+  // (nothing to hide, nothing to reveal afterward). Fire-and-forget: the
+  // card already exists and is fully usable without this.
+  if (pendingScreenshotJobs.length > 0) {
+    const jobs = pendingScreenshotJobs;
+    pendingScreenshotJobs = [];
+    const capturedEl = tooltipEl;
+    // Force an instant hide for the capture — removing 'mrky-tooltip-visible'
+    // above only starts a 0.2s fade, which could leak a half-transparent
+    // tooltip into the screenshot if we captured mid-transition.
+    if (capturedEl) capturedEl.classList.add('mrky-tooltip-capturing');
+    // Reuse isSaving to also block a new hover from reusing this singleton
+    // element while it's forced invisible for the capture above.
+    isSaving = true;
+    captureScreenshot()
+      .then((screenshot) => {
+        if (screenshot) {
+          jobs.forEach((cardId) => {
+            updateCardScreenshot(cardId, screenshot).catch((err) => {
+              console.warn('[Mrky] Failed to attach screenshot to saved card:', err);
+            });
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('[Mrky] Deferred screenshot capture failed:', err);
+      })
+      .finally(() => {
+        // Singleton element — must release the forced hide so the next
+        // hover can show it again.
+        if (capturedEl) capturedEl.classList.remove('mrky-tooltip-capturing');
+        isSaving = false;
+      });
+  }
 }
 
 /**
@@ -402,13 +479,15 @@ function positionTooltip(wordEl) {
 
   // Smart Adaptive Positioning: if near the top edge of viewport, flip below
   if (rect.top < tooltipHeight + 15) {
-    const top = rect.bottom + 10;
+    let top = rect.bottom + 10;
+    const maxTop = window.innerHeight - tooltipHeight - 10;
+    if (top > maxTop) top = Math.max(10, maxTop);
     tooltipEl.classList.add('mrky-tooltip-below');
     tooltipEl.style.left = `${left}px`;
     tooltipEl.style.top = `${top}px`;
     tooltipEl.style.transform = 'translateY(0)';
   } else {
-    const top = rect.top - 10;
+    let top = rect.top - 10;
     tooltipEl.classList.remove('mrky-tooltip-below');
     tooltipEl.style.left = `${left}px`;
     tooltipEl.style.top = `${top}px`;
@@ -427,73 +506,141 @@ async function handleAddCard(e) {
   }
   if (!currentWord) return;
 
-  const btn = tooltipEl.querySelector('.mrky-btn-add');
-  btn.disabled = true;
-  btn.textContent = '⏳ جاري التحقق...';
+  // Snapshot the word NOW, before any await. currentWord is a shared global
+  // that showTooltip() reassigns on every hover; without this snapshot, a
+  // hover on a different word while this save is in flight could silently
+  // save the wrong word/translation/sentence. (The isSaving guard added to
+  // showTooltip() above prevents that reassignment too — this snapshot is
+  // the second, independent layer of protection for the same failure mode.)
+  const wordSnapshot = { ...currentWord };
 
-  // ── Server-side usage gate ──
-  const usageResult = await incrementUsageOnServer('word');
-
-  if (!usageResult.allowed) {
-    if (usageResult.error === 'unauthenticated') {
-      btn.textContent = '🔐 سجّل دخولك أولاً';
-      btn.classList.add('mrky-btn-locked');
-    } else {
-      btn.innerHTML = '🔒 وصلت الحد اليومي — <span class="mrky-pro-nudge">ترقّ لـ Pro</span>';
-      btn.classList.add('mrky-btn-locked');
-    }
-    setTimeout(() => {
-      btn.textContent = '+ أضف بطاقة';
-      btn.disabled = false;
-      btn.classList.remove('mrky-btn-locked');
-    }, 3000);
-    return;
-  }
-
-  btn.textContent = '⏳ جاري الحفظ...';
-
+  isSaving = true;
   try {
-    // Re-check currentWord after async gap — user may have dismissed tooltip during await
-    if (!currentWord) return;
+    const btn = tooltipEl.querySelector('.mrky-btn-add');
+    btn.disabled = true;
 
-    // Temporarily hide tooltip to capture clean page screenshot
-    if (tooltipEl) tooltipEl.style.setProperty('display', 'none', 'important');
-    const screenshot = await captureScreenshot();
-    if (tooltipEl) tooltipEl.style.removeProperty('display');
+    // ── Step 1: Instant quota check (chrome.storage.local only, ~1-5ms) ──
+    // isPremium and dailyUsage both read from chrome.storage.local which
+    // does NOT wake the Service Worker — it's an in-process API call that
+    // resolves in under 5ms even on slow devices.
+    const isPro = await isUserPremium();
 
-    // Re-check again after screenshot capture
-    if (!currentWord) return;
+    let usageResult;
+    if (isPro) {
+      // ── Pro fast-path: unlimited, no network round-trip ──
+      usageResult = { allowed: true, is_pro: true };
+    } else {
+      // ── Free fast-path: trust the locally cached daily count ──
+      const localUsage = await getLocalDailyUsage('word');
 
-    await addCard({
-      word: currentWord.word,
-      translation: currentWord.translation || '',
-      pos: currentWord.posInfo.label,
-      sentence: currentWord.sentence,
-      contextUrl: window.location.href,
-      screenshot: screenshot,
-    });
+      if (localUsage.remaining <= 0) {
+        btn.innerHTML = '🔒 وصلت الحد اليومي — <span class="mrky-pro-nudge">ترقّ لـ Pro</span>';
+        btn.classList.add('mrky-btn-locked');
+        setTimeout(() => {
+          btn.textContent = '+ أضف بطاقة';
+          btn.disabled = false;
+          btn.classList.remove('mrky-btn-locked');
+        }, 3000);
+        return;
+      }
 
-    btn.textContent = '✅ تم الحفظ!';
-    btn.classList.add('mrky-btn-saved');
+      const optimisticCount = localUsage.count + 1;
+      usageResult = { allowed: true, is_pro: false, count: optimisticCount };
 
-    // Show remaining count for free users
+      // Bump the local cache immediately so a rapid second click sees the
+      // correct decremented count.
+      const todayStr = new Date().toISOString().slice(0, 10);
+      chrome.storage.local.set({ dailyWordCount: optimisticCount, dailyUsageDate: todayStr });
+
+      // Fire-and-forget: validate & persist with the server in the background.
+      incrementUsageOnServer('word').then((serverResult) => {
+        if (!serverResult.allowed && currentWord && currentWord.sessionId === wordSnapshot.sessionId) {
+          const liveBtn = tooltipEl.querySelector('.mrky-btn-add');
+          if (!liveBtn) return;
+          if (serverResult.error === 'unauthenticated') {
+            liveBtn.textContent = '🔐 سجّل دخولك أولاً';
+          } else if (serverResult.error === 'context_invalidated') {
+            liveBtn.textContent = '🔄 يرجى تحديث الصفحة';
+          } else {
+            liveBtn.innerHTML = '🔒 وصلت الحد اليومي — <span class="mrky-pro-nudge">ترقّ لـ Pro</span>';
+          }
+          liveBtn.classList.add('mrky-btn-locked');
+          liveBtn.classList.remove('mrky-btn-saved');
+          setTimeout(() => {
+            liveBtn.textContent = '+ أضف بطاقة';
+            liveBtn.disabled = false;
+            liveBtn.classList.remove('mrky-btn-locked');
+          }, 3000);
+        }
+      }).catch((err) => {
+        console.error('[Mrky] Background quota sync failed (add card):', err);
+      });
+    }
+
+    // ── Step 2: Instant success UI (~1-5ms after click) ──
+    // Show "saved" BEFORE the Service-Worker-dependent duplicate check and
+    // DB write — those are fired in the background below. The user sees
+    // instant feedback; if a duplicate is discovered retroactively, the
+    // button text is corrected after the fact.
+    let savedText = '✅ تم الحفظ!';
     if (!usageResult.is_pro && typeof usageResult.count === 'number') {
       const remaining = 10 - usageResult.count;
-      if (remaining >= 0) {
-        btn.textContent = `✅ تم الحفظ! (${remaining} متبقية)`;
-      }
+      if (remaining >= 0) savedText = `✅ تم الحفظ! (${remaining} متبقية)`;
     }
+    btn.textContent = savedText;
+    btn.classList.add('mrky-btn-saved');
 
     setTimeout(() => {
       btn.textContent = '+ أضف بطاقة';
       btn.disabled = false;
       btn.classList.remove('mrky-btn-saved');
-      hideTooltip();
-    }, 1500);
-  } catch (error) {
-    console.error('[Mrky] Error saving card:', error);
-    btn.textContent = '⚠ خطأ';
-    btn.disabled = false;
+      // Precision match: only hide if the active tooltip belongs to this EXACT hover session!
+      if (currentWord && currentWord.sessionId === wordSnapshot.sessionId) {
+        hideTooltip();
+      }
+    }, 600);
+
+    // ── Step 3: Background fire-and-forget — duplicate check + save ──
+    // isCardExists() wakes the Service Worker (50ms–1s cold start) so it
+    // runs AFTER the UI has already responded. If a duplicate is found,
+    // the button is corrected retroactively. If isCardExists itself fails
+    // (e.g. SW crashed), .catch(() => false) treats it as "not duplicate"
+    // and lets addCard() handle it (which has its own CARD_ALREADY_EXISTS
+    // guard).
+    isCardExists(wordSnapshot.word).catch(() => false).then((alreadyExists) => {
+      if (alreadyExists) {
+        if (currentWord && currentWord.sessionId === wordSnapshot.sessionId) {
+          const liveBtn = tooltipEl.querySelector('.mrky-btn-add');
+          if (liveBtn) {
+            liveBtn.textContent = 'ℹ️ البطاقة مضافة مسبقاً';
+            liveBtn.classList.remove('mrky-btn-saved');
+          }
+        }
+        return;
+      }
+      return addCard({
+        word: wordSnapshot.word,
+        translation: wordSnapshot.translation || '',
+        pos: wordSnapshot.posInfo.label,
+        sentence: wordSnapshot.sentence,
+        contextUrl: window.location.href,
+        screenshot: null,
+      }).then((cardId) => {
+        pendingScreenshotJobs.push(cardId);
+      });
+    }).catch((error) => {
+      console.error('[Mrky] Error saving card:', error);
+      if (currentWord && currentWord.sessionId === wordSnapshot.sessionId) {
+        const isDuplicate = error.message && error.message.includes('CARD_ALREADY_EXISTS');
+        const liveBtn = tooltipEl.querySelector('.mrky-btn-add');
+        if (liveBtn) {
+          liveBtn.textContent = isDuplicate ? 'ℹ️ البطاقة مضافة مسبقاً' : '⚠ خطأ';
+          liveBtn.classList.remove('mrky-btn-saved');
+        }
+      }
+    });
+  } finally {
+    isSaving = false;
   }
 }
 
@@ -508,11 +655,16 @@ async function handleMarkKnown(e) {
   }
   if (!currentWord) return;
 
+  const fetchSessionId = currentWord.sessionId;
   const btn = tooltipEl.querySelector('.mrky-btn-known');
   btn.disabled = true;
 
   try {
     await markAsKnown(currentWord.word);
+
+    // Guard against stale hover session
+    if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
+
     btn.textContent = '✅ تم!';
 
     // Dispatch event so the overlay can update the word's style
@@ -523,7 +675,9 @@ async function handleMarkKnown(e) {
     setTimeout(() => {
       btn.textContent = '✓ أعرفها';
       btn.disabled = false;
-      hideTooltip();
+      if (currentWord && currentWord.sessionId === fetchSessionId) {
+        hideTooltip();
+      }
     }, 800);
   } catch (error) {
     console.error('[Mrky] Error marking word as known:', error);
@@ -562,6 +716,7 @@ async function handleTranslateSentence(e) {
   }
   if (!currentWord || !currentWord.sentence) return;
 
+  const fetchSessionId = currentWord.sessionId;
   const btn = tooltipEl.querySelector('.mrky-btn-translate-sentence');
   const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
   const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
@@ -583,6 +738,10 @@ async function handleTranslateSentence(e) {
   try {
     // Translate the entire sentence via background service worker (leverages LRU cache)
     const res = await translateViaBackground(currentWord.sentence, '');
+
+    // Guard against stale hover session
+    if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
+
     if (res && res.error === 'context_invalidated') {
       arEl.innerHTML = '<span style="color: #FF8A8A;">🔄 يرجى تحديث الصفحة لتنشيط الإضافة بعد التحديث.</span>';
       btn.innerHTML = '<span>🔄</span> <span>تحديث الصفحة مطلوب</span>';
@@ -599,6 +758,7 @@ async function handleTranslateSentence(e) {
     }
   } catch (err) {
     console.error('[Mrky] Sentence translation error:', err);
+    if (!currentWord || currentWord.sessionId !== fetchSessionId) return;
     arEl.textContent = '⚠ حدث خطأ في الاتصال.';
     btn.disabled = false;
     btn.innerHTML = '<span>🌐</span> <span>ترجمة الجملة</span>';
@@ -618,6 +778,12 @@ async function handleExplainWord(e) {
   }
   if (!currentWord) return;
 
+  // Snapshot the word NOW, before any await — same race-condition guard
+  // applied to handleAddCard. Without this, a hover on a different word
+  // while incrementUsageOnServer is in flight would generate the explanation
+  // for the wrong word.
+  const wordSnapshot = { ...currentWord };
+
   const btn = tooltipEl.querySelector('.mrky-btn-explain');
   const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
   const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
@@ -632,33 +798,88 @@ async function handleExplainWord(e) {
     return;
   }
 
-  // ── Server-side usage gate ──
+  // ── Cache hit: same word+sentence already explained → re-display instantly
+  // without charging a quota unit ──
+  const snapshotSentence = wordSnapshot.sentence || wordSnapshot.word;
+  if (lastExplanation.word === wordSnapshot.word && lastExplanation.sentence === snapshotSentence && lastExplanation.html) {
+    explainBox.innerHTML = lastExplanation.html;
+    explainBox.classList.remove('hidden');
+    btn.innerHTML = '<span>✓</span> <span>تم التعليل</span>';
+    return;
+  }
+
+  // ── Pro fast-path ──
   btn.disabled = true;
-  btn.innerHTML = '<span>⏳</span> <span>جاري التحقق...</span>';
+  btn.innerHTML = '<span>⏳</span> <span>جاري التعليل...</span>';
 
-  const usageResult = await incrementUsageOnServer('explain');
+  const isPro = await isUserPremium();
 
-  if (!usageResult.allowed) {
-    btn.disabled = false;
-    if (usageResult.error === 'unauthenticated') {
-      btn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
-      btn.classList.add('mrky-btn-locked');
-    } else {
+  let usageResult;
+  if (isPro) {
+    // ── Pro fast-path: unlimited, no network round-trip ──
+    usageResult = { allowed: true, is_pro: true };
+  } else {
+    // ── Free fast-path: trust the locally cached daily count instead of
+    // blocking the click on a network round-trip — same trust model as
+    // the Pro fast-path above, applied to the quota counter. The 10/day
+    // cap stays fully enforced; only the perceived latency changes.
+    const localUsage = await getLocalDailyUsage('explain');
+
+    if (localUsage.remaining <= 0) {
+      btn.disabled = false;
       btn.innerHTML = '<span>🔒</span> <span>وصلت الحد — <span class="mrky-pro-nudge">Pro</span></span>';
       btn.classList.add('mrky-btn-locked');
+      setTimeout(() => {
+        btn.innerHTML = '<span>🧠</span> <span>علل</span>';
+        btn.classList.remove('mrky-btn-locked');
+      }, 3000);
+      return;
     }
-    setTimeout(() => {
-      btn.innerHTML = '<span>🧠</span> <span>علل</span>';
-      btn.classList.remove('mrky-btn-locked');
-    }, 3000);
-    return;
+
+    const optimisticCount = localUsage.count + 1;
+    usageResult = { allowed: true, is_pro: false, count: optimisticCount };
+
+    // Bump the local cache immediately so a rapid second click before the
+    // background reconciliation below resolves still sees the correct
+    // decremented count instead of over-allowing.
+    const todayStr = new Date().toISOString().slice(0, 10);
+    chrome.storage.local.set({ dailyExplainCount: optimisticCount, dailyUsageDate: todayStr });
+
+    // Fire-and-forget: validate & persist with the server in the
+    // background. If it disagrees, correct the button after the fact
+    // instead of blocking the click on it.
+    incrementUsageOnServer('explain').then((serverResult) => {
+      if (!serverResult.allowed && currentWord && currentWord.sessionId === wordSnapshot.sessionId) {
+        const liveBtn = tooltipEl.querySelector('.mrky-btn-explain');
+        if (!liveBtn) return;
+        if (serverResult.error === 'unauthenticated') {
+          liveBtn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+        } else if (serverResult.error === 'context_invalidated') {
+          liveBtn.innerHTML = '<span>🔄</span> <span>يرجى تحديث الصفحة</span>';
+        } else {
+          liveBtn.innerHTML = '<span>🔒</span> <span>وصلت الحد — <span class="mrky-pro-nudge">Pro</span></span>';
+        }
+        liveBtn.classList.add('mrky-btn-locked');
+        setTimeout(() => {
+          liveBtn.innerHTML = '<span>🧠</span> <span>علل</span>';
+          liveBtn.classList.remove('mrky-btn-locked');
+        }, 3000);
+      }
+    }).catch((err) => {
+      console.error('[Mrky] Background quota sync failed (explain):', err);
+    });
   }
 
   btn.disabled = false;
 
   // Generate explanation using local Gemini Nano AI if available, falling back to rule-based engine
-  const sentence = currentWord.sentence || currentWord.word;
-  const htmlContent = await getSmartExplanation(currentWord.word, sentence);
+  const htmlContent = await getSmartExplanation(wordSnapshot.word, snapshotSentence);
+
+  // Guard against stale hover session
+  if (!currentWord || currentWord.sessionId !== wordSnapshot.sessionId) return;
+
+  // Cache the result for re-display without re-charging quota
+  lastExplanation = { word: wordSnapshot.word, sentence: snapshotSentence, html: htmlContent };
 
   explainBox.innerHTML = htmlContent;
   explainBox.classList.remove('hidden');

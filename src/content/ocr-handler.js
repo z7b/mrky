@@ -8,11 +8,11 @@
  */
 import { analyzeText } from '../shared/nlp-processor.js';
 import { translateViaBackground } from '../shared/translate.js';
-import { getKnownWordsSet, addCard } from '../shared/db.js';
+import { getKnownWordsSet, addCard, isCardExists } from '../shared/db.js';
 import { showTooltip, hideTooltip } from './tooltip.js';
 import { mrkyEnabled } from './enabled-state.js';
 import { playPronunciation } from '../shared/audio.js';
-import { incrementUsageOnServer } from '../shared/supabase.js';
+import { incrementUsageOnServer, isUserPremium, getLocalDailyUsage } from '../shared/supabase.js';
 
 let isOCRMode = false;
 let isImageScanMode = false;
@@ -205,14 +205,11 @@ async function handleMouseUp(e) {
 
     // ── Strategy 2: Screenshot crop (for normal web pages) ──
     if (!croppedImage) {
-      // Temporarily hide OCR overlay and tooltip to get a clean screenshot of the page
-      if (ocrOverlay) ocrOverlay.style.setProperty('display', 'none', 'important');
+      // Temporarily hide OCR overlay and tooltip to get a clean screenshot of
+      // the page (opacity-based hide → smooth fade back in, no instant pop)
+      if (ocrOverlay) ocrOverlay.classList.add('mrky-capture-hide');
       const tooltip = document.getElementById('mrky-tooltip');
-      let originalTooltipDisplay = '';
-      if (tooltip) {
-        originalTooltipDisplay = tooltip.style.display;
-        tooltip.style.display = 'none';
-      }
+      if (tooltip) tooltip.classList.add('mrky-tooltip-capturing');
 
       // Force layout calculation and wait for paint to ensure overlays are hidden before screenshot
       document.body.offsetHeight;
@@ -220,11 +217,9 @@ async function handleMouseUp(e) {
 
       const screenshot = await captureScreenshot();
 
-      // Restore OCR overlay and tooltip visibility immediately
-      if (ocrOverlay) ocrOverlay.style.removeProperty('display');
-      if (tooltip) {
-        tooltip.style.display = originalTooltipDisplay;
-      }
+      // Restore OCR overlay and tooltip visibility (fades back in)
+      if (ocrOverlay) ocrOverlay.classList.remove('mrky-capture-hide');
+      if (tooltip) tooltip.classList.remove('mrky-tooltip-capturing');
 
       if (screenshot) {
         croppedImage = await cropImage(screenshot, rect);
@@ -331,43 +326,102 @@ async function showOCRResultPanel(text, analyzed) {
   panel.querySelector('.mrky-btn-add').addEventListener('click', async () => {
     const btn = panel.querySelector('.mrky-btn-add');
     btn.disabled = true;
-    btn.textContent = '⏳ جاري التحقق...';
 
-    // ── Server-side usage gate ──
-    const usageResult = await incrementUsageOnServer('word');
+    // ── Step 1: Instant quota check (chrome.storage.local only, ~1-5ms) ──
+    const isPro = await isUserPremium();
 
-    if (!usageResult.allowed) {
-      if (usageResult.error === 'unauthenticated') {
-        btn.textContent = '🔐 سجّل دخولك أولاً';
-      } else {
+    let usageResult;
+    if (isPro) {
+      usageResult = { allowed: true, is_pro: true };
+    } else {
+      const localUsage = await getLocalDailyUsage('word');
+
+      if (localUsage.remaining <= 0) {
         btn.textContent = '🔒 وصلت الحد اليومي — ترقّ لـ Pro';
+        btn.classList.add('mrky-btn-locked');
+        setTimeout(() => {
+          if (panel.isConnected) {
+            btn.textContent = '+ أضف بطاقة';
+            btn.disabled = false;
+            btn.classList.remove('mrky-btn-locked');
+          }
+        }, 3000);
+        return;
       }
-      btn.classList.add('mrky-btn-locked');
-      setTimeout(() => {
-        btn.textContent = '+ أضف بطاقة';
-        btn.disabled = false;
-        btn.classList.remove('mrky-btn-locked');
-      }, 3000);
-      return;
+
+      const optimisticCount = localUsage.count + 1;
+      usageResult = { allowed: true, is_pro: false, count: optimisticCount };
+
+      const todayStr = new Date().toISOString().slice(0, 10);
+      chrome.storage.local.set({ dailyWordCount: optimisticCount, dailyUsageDate: todayStr });
+
+      incrementUsageOnServer('word').then((serverResult) => {
+        if (!serverResult.allowed && panel.isConnected) {
+          const liveBtn = panel.querySelector('.mrky-btn-add');
+          if (!liveBtn) return;
+          if (serverResult.error === 'unauthenticated') {
+            liveBtn.textContent = '🔐 سجّل دخولك أولاً';
+          } else if (serverResult.error === 'context_invalidated') {
+            liveBtn.textContent = '🔄 يرجى تحديث الصفحة';
+          } else {
+            liveBtn.textContent = '🔒 وصلت الحد اليومي — ترقّ لـ Pro';
+          }
+          liveBtn.classList.add('mrky-btn-locked');
+          setTimeout(() => {
+            if (panel.isConnected) {
+              liveBtn.textContent = '+ أضف بطاقة';
+              liveBtn.disabled = false;
+              liveBtn.classList.remove('mrky-btn-locked');
+            }
+          }, 3000);
+        }
+      }).catch((err) => {
+        console.error('[Mrky] Background quota sync failed (ocr):', err);
+      });
     }
 
-    btn.textContent = '⏳ جاري الحفظ...';
-    const translation = panel.querySelector('.mrky-ocr-result-translation').textContent;
-    await addCard({
-      word: text,
-      translation: translation,
-      pos: 'ocr',
-      sentence: text,
-      contextUrl: window.location.href,
-    });
-
-    // Show remaining count for free users
+    // ── Step 2: Instant success UI (~1-5ms after click) ──
+    let savedText = '✅ تم!';
     if (!usageResult.is_pro && typeof usageResult.count === 'number') {
       const remaining = 10 - usageResult.count;
-      btn.textContent = `✅ تم! (${remaining} متبقية)`;
-    } else {
-      btn.textContent = '✅ تم!';
+      if (remaining >= 0) savedText = `✅ تم! (${remaining} متبقية)`;
     }
+    btn.textContent = savedText;
+
+    setTimeout(() => {
+      if (panel.isConnected) {
+        btn.textContent = '+ أضف بطاقة';
+        btn.disabled = false;
+      }
+    }, 1500);
+
+    // ── Step 3: Background fire-and-forget — duplicate check + save ──
+    const translation = panel.querySelector('.mrky-ocr-result-translation').textContent;
+    
+    isCardExists(text).catch(() => false).then((alreadyExists) => {
+      if (alreadyExists) {
+        if (panel.isConnected) {
+          const liveBtn = panel.querySelector('.mrky-btn-add');
+          if (liveBtn) liveBtn.textContent = 'ℹ️ البطاقة مضافة مسبقاً';
+        }
+        return;
+      }
+      return addCard({
+        word: text,
+        translation: translation,
+        pos: 'ocr',
+        sentence: text,
+        contextUrl: window.location.href,
+        screenshot: null,
+      });
+    }).catch((error) => {
+      console.error('[Mrky] Error saving card from OCR:', error);
+      if (panel.isConnected) {
+        const isDuplicate = error.message && error.message.includes('CARD_ALREADY_EXISTS');
+        const liveBtn = panel.querySelector('.mrky-btn-add');
+        if (liveBtn) liveBtn.textContent = isDuplicate ? 'ℹ️ البطاقة مضافة مسبقاً' : '⚠ خطأ';
+      }
+    });
   });
 
   document.body.appendChild(panel);
@@ -486,14 +540,11 @@ async function handleImageClick(e) {
 
     // If the image is from another domain, capture screenshot and crop instead
     if (imageSource.startsWith('data:') || isCrossOrigin(img)) {
-      // Temporarily hide loading overlay and tooltip to get a clean screenshot of the page
-      if (loadingOverlay) loadingOverlay.style.setProperty('display', 'none', 'important');
+      // Temporarily hide loading overlay and tooltip to get a clean screenshot
+      // of the page (opacity-based hide → smooth fade back in, no instant pop)
+      if (loadingOverlay) loadingOverlay.classList.add('mrky-capture-hide');
       const tooltip = document.getElementById('mrky-tooltip');
-      let originalTooltipDisplay = '';
-      if (tooltip) {
-        originalTooltipDisplay = tooltip.style.display;
-        tooltip.style.display = 'none';
-      }
+      if (tooltip) tooltip.classList.add('mrky-tooltip-capturing');
 
       // Force layout calculation and wait for paint to ensure overlays are hidden before screenshot
       document.body.offsetHeight;
@@ -501,11 +552,9 @@ async function handleImageClick(e) {
 
       const screenshot = await captureScreenshot();
 
-      // Restore loading overlay and tooltip visibility immediately
-      if (loadingOverlay) loadingOverlay.style.removeProperty('display');
-      if (tooltip) {
-        tooltip.style.display = originalTooltipDisplay;
-      }
+      // Restore loading overlay and tooltip visibility (fades back in)
+      if (loadingOverlay) loadingOverlay.classList.remove('mrky-capture-hide');
+      if (tooltip) tooltip.classList.remove('mrky-tooltip-capturing');
 
       if (screenshot) {
         imageSource = await cropImage(screenshot, {

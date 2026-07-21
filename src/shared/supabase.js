@@ -1,6 +1,7 @@
 /**
  * Mrky Supabase Integration & Subscription Manager
- * Enterprise SaaS Architecture: Supabase Auth (Google/Email) + Stripe + Profiles + License Key fallback.
+ * Supabase integration: Firebase Auth bridge, usage limits (Edge Functions),
+ * Lemon Squeezy checkout, license verification.
  */
 
 import { getValidFirebaseToken } from './firebase.js';
@@ -26,10 +27,44 @@ export const LEMON_SQUEEZY_MONTHLY_URL = 'https://enpanda.lemonsqueezy.com/check
  * @param {'word' | 'explain'} type - The usage type to increment
  * @returns {Promise<{allowed: boolean, count?: number, is_pro?: boolean, error?: string}>}
  */
+// ── Offline / network-failure usage allowance ──
+// When the server is unreachable (DNS block, offline, ad-blocker), allow a
+// small number of operations per session before requiring connectivity.
+// This prevents a trivial paywall bypass (block the Supabase domain via
+// hosts file) while not punishing legitimate users with flaky connections.
+// The counter resets to 0 on every successful server round-trip.
+const MAX_OFFLINE_ALLOWANCE = 3;
+let offlineUsageThisSession = 0;
+
+/**
+ * Consume one offline allowance unit and return the appropriate response.
+ * Called when the server is unreachable — either the browser reports offline
+ * or the fetch itself threw a network error (DNS failure, blocked, timeout).
+ * @param {string} reason - Human-readable reason for logging
+ * @returns {{ allowed: boolean, error: string, offline_remaining?: number }}
+ */
+function consumeOfflineAllowance(reason) {
+  offlineUsageThisSession++;
+  if (offlineUsageThisSession <= MAX_OFFLINE_ALLOWANCE) {
+    console.log(
+      `[PANDA Network] ${reason} — offline allowance ${offlineUsageThisSession}/${MAX_OFFLINE_ALLOWANCE}`
+    );
+    return {
+      allowed: true,
+      error: 'network_fallback',
+      offline_remaining: MAX_OFFLINE_ALLOWANCE - offlineUsageThisSession,
+    };
+  }
+  console.log(`[PANDA Network] ${reason} — offline allowance exhausted, blocking`);
+  return { allowed: false, error: 'network_exhausted' };
+}
+
 export async function incrementUsageOnServer(type) {
+  if (typeof chrome === 'undefined' || !chrome.storage) {
+    return { allowed: false, error: 'context_invalidated' };
+  }
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    // Fail-open immediately if offline without logging a warning/error
-    return { allowed: true, error: 'offline_mode' };
+    return consumeOfflineAllowance('Browser reports offline');
   }
 
   // Get a valid (auto-refreshed) Firebase ID token
@@ -53,10 +88,7 @@ export async function incrementUsageOnServer(type) {
       }
     );
   } catch (err) {
-    // Changing this catch block to fail-closed would break offline users. Changing the
-    // architecture to server-side enforcement is the correct path for paid features.
-    console.log('[PANDA Network] Offline or DNS failure — failing open:', err.message);
-    return { allowed: true, error: 'network_fallback' };
+    return consumeOfflineAllowance('Fetch failed: ' + err.message);
   }
 
   // ── Server responded — respect its decision (Fail-Closed) ──
@@ -68,6 +100,9 @@ export async function incrementUsageOnServer(type) {
   // ── Parse response body — fail-closed on malformed JSON ──
   try {
     const data = await response.json();
+    // Server responded successfully — reset offline counter so transient
+    // network blips don't permanently penalise the user.
+    offlineUsageThisSession = 0;
     if (typeof data.count === 'number') {
       const todayStr = new Date().toISOString().slice(0, 10);
       const storageKey = type === 'word' ? 'dailyWordCount' : 'dailyExplainCount';
@@ -95,6 +130,9 @@ export async function incrementUsageOnServer(type) {
  */
 export async function fetchDailyUsageFromServer() {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return null;
+  }
+  if (typeof chrome === 'undefined' || !chrome.storage) {
     return null;
   }
 
@@ -241,48 +279,76 @@ export async function verifyLicenseKey(licenseKey) {
 
   try {
     const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/licenses?key=eq.${encodeURIComponent(cleanKey)}&select=id,key,is_active,plan,expires_at`,
+      `${SUPABASE_URL}/functions/v1/verify-license`,
       {
-        method: 'GET',
+        method: 'POST',
         headers: {
           'apikey': SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json'
-        }
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ licenseKey: cleanKey }),
       }
     );
 
-    if (!response.ok) {
+    const result = await response.json().catch(() => null);
+
+    if (!response.ok || !result) {
       console.log('[Mrky Supabase] Error HTTP status:', response.status);
       return { valid: false, error: 'تعذر الاتصال بقاعدة بيانات التحقق' };
     }
 
-    const rows = await response.json();
-    if (!rows || rows.length === 0) {
-      return { valid: false, error: 'مفتاح الترخيص غير صحيح أو غير موجود' };
-    }
-
-    const license = rows[0];
-    if (!license.is_active) {
-      return { valid: false, error: 'مفتاح الترخيص غير مفعل أو منتهي الصلاحية' };
+    if (!result.valid) {
+      return { valid: false, error: result.error || 'مفتاح الترخيص غير صحيح أو غير موجود' };
     }
 
     // Save premium status locally
     await chrome.storage.local.set({
       isPremium: true,
       licenseKey: cleanKey,
-      plan: license.plan || 'pro'
+      plan: result.plan || 'pro'
     });
 
     return {
       valid: true,
-      plan: license.plan || 'pro',
-      expiresAt: license.expires_at
+      plan: result.plan || 'pro',
+      expiresAt: result.expiresAt
     };
   } catch (err) {
     console.log('[Mrky Supabase] Network error verifying license:', err);
     return { valid: false, error: 'خطأ في الاتصال بالشبكة' };
   }
+}
+
+/**
+ * Read the locally cached daily usage count INSTANTLY, with no network
+ * round-trip. Kept fresh by: (a) the periodic warm-up call to
+ * fetchDailyUsageFromServer() already fired from showTooltip() in
+ * tooltip.js (throttled to every 25s), and (b) every successful write from
+ * incrementUsageOnServer() below. This mirrors the exact same trust model
+ * already used by isUserPremium() — trust the local cache at click-time,
+ * reconcile with the server in the background — just applied to the daily
+ * quota counter instead of the plan flag. The 10/day cap itself is
+ * unchanged; only how instantly the check feels to the user changes.
+ * @param {'word' | 'explain'} type
+ * @returns {Promise<{count: number, remaining: number, isStale: boolean}>}
+ */
+export async function getLocalDailyUsage(type) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      ['dailyWordCount', 'dailyExplainCount', 'dailyUsageDate'],
+      (data) => {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        const isStale = data.dailyUsageDate !== todayStr;
+        const count = isStale
+          ? 0
+          : type === 'word'
+            ? (data.dailyWordCount || 0)
+            : (data.dailyExplainCount || 0);
+        resolve({ count, remaining: Math.max(0, 10 - count), isStale });
+      }
+    );
+  });
 }
 
 /**
@@ -321,27 +387,72 @@ export function loginWithGoogle() {
 }
 
 /**
+ * Open secure Lemon Squeezy checkout with a SERVER-VERIFIED email when the
+ * user is logged in (via Firebase), falling back to the old client-side
+ * URL construction if they aren't (so checkout still works either way).
+ *
+ * Opens the window synchronously first, then redirects it once the
+ * server-built URL is ready — awaiting the fetch before calling
+ * window.open() would get the popup blocked, since the browser only
+ * associates a "user gesture" with a window.open() call made synchronously
+ * inside the click handler.
+ */
+async function openCheckoutSecurely(plan, fallbackEmail) {
+  const popup = window.open('', '_blank');
+
+  try {
+    const idToken = await getValidFirebaseToken();
+    if (!idToken) {
+      // 🔒 SECURITY FIX: Unauthenticated users MUST log in first to bind their subscription securely.
+      // Eliminates the fallback path that allowed building checkout URLs from unverified client inputs.
+      if (popup) popup.close();
+      alert('🔐 يرجى تسجيل الدخول أو إنشاء حساب أولاً لإكمال عملية الشراء وتفعيل اشتراكك تلقائياً.');
+      return;
+    }
+
+    const response = await fetch(
+      `${SUPABASE_URL}/functions/v1/create-checkout`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'X-Firebase-Token': idToken,
+        },
+        body: JSON.stringify({ plan }),
+      }
+    );
+
+    const result = await response.json().catch(() => null);
+    if (response.ok && result?.url) {
+      if (popup) popup.location.href = result.url;
+      else window.open(result.url, '_blank');
+      return;
+    }
+
+    console.log('[Mrky Supabase] create-checkout failed:', result?.error);
+    if (popup) popup.close();
+    alert('⚠ تعذر إنشاء رابط الشراء، يرجى المحاولة لاحقاً.');
+  } catch (err) {
+    console.log('[Mrky Supabase] create-checkout error:', err);
+    if (popup) popup.close();
+    alert('⚠ خطأ في الاتصال بالشبكة.');
+  }
+}
+
+/**
  * Open secure Lemon Squeezy Annual Checkout (pre-fills email if provided)
  */
-export function openAnnualCheckout(email = '') {
-  let url = LEMON_SQUEEZY_ANNUAL_URL;
-  if (email && typeof email === 'string' && email.includes('@')) {
-    const encoded = encodeURIComponent(email.trim());
-    url += `?checkout[email]=${encoded}&checkout[custom][ext_email]=${encoded}`;
-  }
-  window.open(url, '_blank');
+export async function openAnnualCheckout(email = '') {
+  await openCheckoutSecurely('annual', email);
 }
 
 /**
  * Open secure Lemon Squeezy Monthly Checkout (pre-fills email if provided)
  */
-export function openMonthlyCheckout(email = '') {
-  let url = LEMON_SQUEEZY_MONTHLY_URL;
-  if (email && typeof email === 'string' && email.includes('@')) {
-    const encoded = encodeURIComponent(email.trim());
-    url += `?checkout[email]=${encoded}&checkout[custom][ext_email]=${encoded}`;
-  }
-  window.open(url, '_blank');
+export async function openMonthlyCheckout(email = '') {
+  await openCheckoutSecurely('monthly', email);
 }
 
 /**

@@ -361,6 +361,10 @@ export async function sendPasswordResetEmail(email) {
  */
 export function getValidFirebaseToken() {
   return new Promise((resolve) => {
+    if (typeof chrome === 'undefined' || !chrome.storage) {
+      resolve(null);
+      return;
+    }
     chrome.storage.local.get(
       ['firebaseToken', 'firebaseRefreshToken', 'firebaseTokenExpiry'],
       async (stored) => {

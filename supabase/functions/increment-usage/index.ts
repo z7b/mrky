@@ -4,7 +4,7 @@
  * Secure gateway between the extension (Firebase Auth) and Supabase DB.
  *
  * Architecture:
- *   Extension → Firebase ID Token → this Edge Function → verifies token via Google Identity Toolkit
+ *   Extension → Firebase ID Token → this Edge Function → verifies token locally via Google's public JWKS
  *   → extracts email server-side → calls increment_usage(p_email, p_type) with service_role → returns result
  *
  * Why this exists:
@@ -17,18 +17,43 @@
  *      itself enforces all business rules)
  *
  * Security layers:
- *   - Firebase token is verified via Google's Identity Toolkit API (not decoded locally)
+ *   - Firebase token signature is verified locally against Google's public JWKS (no per-request
+ *     network round trip — this is the SAME verification Firebase Admin SDK does under the hood,
+ *     just without needing the full Admin SDK). Issuer + audience + expiry are checked too.
  *   - Email is extracted server-side from the verified token (never from client params)
  *   - DB function is REVOKE'd from anon/authenticated — only service_role can call it
  *   - CORS is restricted to extension origin
  */
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createRemoteJWKSet, jwtVerify } from 'https://esm.sh/jose@5';
+
+// ── 1. Firebase Token Verification Logic (Inlined) ──
+const FIREBASE_PROJECT_ID = Deno.env.get('FIREBASE_PROJECT_ID') || '';
+const JWKS = createRemoteJWKSet(
+  new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com')
+);
+
+async function verifyFirebaseToken(idToken: string): Promise<string | null> {
+  if (!idToken || !FIREBASE_PROJECT_ID) return null;
+  try {
+    const { payload } = await jwtVerify(idToken, JWKS, {
+      issuer: `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`,
+      audience: FIREBASE_PROJECT_ID,
+    });
+    const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+    return email || null;
+  } catch (err) {
+    console.error('[verify-firebase-token] Failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+// ── 2. Edge Function Logic ──
 
 // ── Environment Variables ──
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const FIREBASE_API_KEY = Deno.env.get('FIREBASE_API_KEY') || '';
 
 // ── CORS Headers ──
 const CORS_HEADERS: Record<string, string> = {
@@ -36,46 +61,6 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, apikey, x-firebase-token',
 };
-
-/**
- * Verify a Firebase ID token by calling Google's Identity Toolkit API.
- * This is a server-to-server call — Google verifies the token's signature, expiry,
- * and issuer, then returns the user's profile including email.
- *
- * @param idToken - The Firebase ID token from the extension
- * @returns The verified user's email (lowercase, trimmed), or null if invalid
- */
-async function verifyFirebaseToken(idToken: string): Promise<string | null> {
-  if (!idToken || !FIREBASE_API_KEY) return null;
-
-  try {
-    const res = await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${FIREBASE_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idToken }),
-      }
-    );
-
-    if (!res.ok) {
-      console.error('[increment-usage] Firebase token verification failed:', res.status);
-      return null;
-    }
-
-    const data = await res.json();
-    const user = data.users?.[0];
-    if (!user?.email) {
-      console.error('[increment-usage] Verified token has no email');
-      return null;
-    }
-
-    return user.email.trim().toLowerCase();
-  } catch (err) {
-    console.error('[increment-usage] Firebase verification network error:', err);
-    return null;
-  }
-}
 
 /**
  * Create a typed JSON response with standard headers.

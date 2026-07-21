@@ -62,8 +62,13 @@ function processPageText() {
   if (!mrkyEnabled) return;
 
   // Find common readable text containers that are not yet processed
-  const elements = Array.from(document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, [data-mrky-pdf-text]'))
-    .filter(el => !el.dataset.mrkyProcessed && !el.classList.contains('mrky-word') && !el.closest('.mrky-word'));
+  const elements = Array.from(document.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, div, span, a, td, th, dt, dd, figcaption, [data-mrky-pdf-text]'))
+    .filter(el => {
+      if (el.dataset.mrkyProcessed || el.classList.contains('mrky-word') || el.closest('.mrky-word')) return false;
+      // Safeguard: ignore massive layout containers to prevent freezing, but process small ones
+      if ((el.tagName === 'DIV' || el.tagName === 'SPAN' || el.tagName === 'TD') && el.children.length > 5) return false;
+      return true;
+    });
 
   if (elements.length === 0) return;
 
@@ -115,11 +120,43 @@ function getTextNodes(node) {
 }
 
 /**
+ * Extract a bounded sentence around a word from a larger text.
+ * Prevents passing entire-page content (e.g. Wikipedia) as the
+ * "sentence" parameter to showTooltip.
+ */
+function extractSentenceContext(text, word, maxLen = 300) {
+  if (text.length <= maxLen) return text;
+
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf(word.toLowerCase());
+  if (idx === -1) return text.slice(0, maxLen);
+
+  // Walk backward to sentence start (. ! ? or newline)
+  let start = idx;
+  while (start > 0 && !/[.!?\n]/.test(text[start - 1])) start--;
+
+  // Walk forward to sentence end
+  let end = idx + word.length;
+  while (end < text.length && !/[.!?\n]/.test(text[end])) end++;
+  if (end < text.length) end++; // include the punctuation
+
+  let sentence = text.slice(start, end).trim();
+
+  // If still too long (no punctuation found), fall back to a
+  // character window centred on the word.
+  if (sentence.length > maxLen) {
+    const half = Math.floor(maxLen / 2);
+    sentence = text.slice(Math.max(0, idx - half), Math.min(text.length, idx + word.length + half)).trim();
+  }
+  return sentence;
+}
+
+/**
  * Process text nodes inside a container individually to preserve links and HTML tags.
  */
 function processElementTextNodes(el) {
   const textNodes = getTextNodes(el);
-  const parentText = el.textContent; // Used for full sentence context in tooltips
+  const parentText = el.textContent; // Full container text — extractSentenceContext bounds it per-word
 
   for (const node of textNodes) {
     const fullText = node.textContent;
@@ -171,14 +208,14 @@ function processElementTextNodes(el) {
               clearTimeout(hideTimeout);
               document.querySelectorAll('.mrky-word-hover').forEach(s => s.classList.remove('mrky-word-hover'));
               wordSpan.classList.add('mrky-word-hover');
-              showTooltip(wordSpan, item.word, item.posInfo, parentText);
+              showTooltip(wordSpan, item.word, item.posInfo, extractSentenceContext(parentText, item.word));
             });
           } else {
             wordSpan.addEventListener('mouseenter', () => {
               if (!mrkyEnabled) return;
               clearTimeout(hideTimeout);
               wordSpan.classList.add('mrky-word-hover');
-              showTooltip(wordSpan, item.word, item.posInfo, parentText);
+              showTooltip(wordSpan, item.word, item.posInfo, extractSentenceContext(parentText, item.word));
             });
 
             wordSpan.addEventListener('mouseleave', () => {

@@ -12,6 +12,19 @@ if (!isContentScript) {
     knownWords: '++id, &word',
     settings: 'key',
   });
+
+  // v2: add an indexed `lowerWord` column so duplicate checks are an index
+  // lookup instead of a full-table `.filter()` scan. The upgrade callback
+  // backfills the column for every card that already exists on disk.
+  db.version(2).stores({
+    cards: '++id, word, lowerWord, translation, pos, sentence, contextUrl, createdAt, nextReview, interval, ease',
+    knownWords: '++id, &word',
+    settings: 'key',
+  }).upgrade(async (tx) => {
+    await tx.table('cards').toCollection().modify((card) => {
+      card.lowerWord = (card.word || '').toLowerCase().trim();
+    });
+  });
 }
 
 function proxyCall(method, ...args) {
@@ -51,13 +64,42 @@ function getDefaultFallback(method) {
   if (method === 'getKnownWordsSet') return new Set();
   if (method === 'getAllCards' || method === 'getDueCards') return [];
   if (method === 'getKnownWordCount') return 0;
+  if (method === 'isCardExists') return false; // fail open — addCard's own check is the final safety net
   return undefined;
+}
+
+/**
+ * Check whether a card for this word already exists, WITHOUT writing anything.
+ * Used to short-circuit before incrementUsageOnServer() so a duplicate save
+ * never costs the user a daily quota unit.
+ */
+export async function isCardExists(word) {
+  if (isContentScript) return proxyCall('isCardExists', word);
+  const lowerWord = word.toLowerCase().trim();
+  // Indexed lookup — O(log n) instead of scanning every card with .filter().
+  const existing = await db.cards.where('lowerWord').equals(lowerWord).first();
+  return Boolean(existing);
+}
+
+export async function updateCardScreenshot(cardId, screenshot) {
+  if (isContentScript) return proxyCall('updateCardScreenshot', cardId, screenshot);
+  if (cardId == null) return; // nothing to update against
+  await db.cards.update(cardId, { screenshot });
 }
 
 export async function addCard(card) {
   if (isContentScript) return proxyCall('addCard', card);
+
+  // Prevent duplicates — indexed lookup, same as isCardExists above.
+  const lowerWord = card.word.toLowerCase().trim();
+  const existingCard = await db.cards.where('lowerWord').equals(lowerWord).first();
+  if (existingCard) {
+    throw new Error('CARD_ALREADY_EXISTS');
+  }
+
   return db.cards.add({
     ...card,
+    lowerWord,
     createdAt: Date.now(),
     nextReview: Date.now(),
     interval: 1,

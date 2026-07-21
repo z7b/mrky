@@ -90,7 +90,7 @@ export function analyzeText(sentence, knownWords = new Set()) {
       pos = 'adv';
     }
 
-    const isStop = STOP_WORDS.has(lower);
+    const isStop = false; // STOP_WORDS.has(lower); // Disabled per user request
     const isKnown = knownWords.has(lower);
 
     results.push({

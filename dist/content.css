@@ -240,6 +240,32 @@
   pointer-events: auto;
 }
 
+/* Used only for the instant it takes to capture a clean screenshot for a
+   flashcard. opacity:0 + transition:none guarantees an instant, complete
+   hide (screenshot never contains the tooltip) — exactly as safe as the
+   display:none it replaces. Removing this class lets the normal
+   .mrky-tooltip transition (opacity 0.2s ease) animate the reveal smoothly
+   instead of the box popping back at full opacity in a single frame. */
+.mrky-tooltip.mrky-tooltip-capturing {
+  opacity: 0 !important;
+  transition: none !important;
+  pointer-events: none !important;
+}
+
+/* Same idea as .mrky-tooltip-capturing above, generalized for the OCR
+   selection overlay and per-image loading overlay, which aren't
+   .mrky-tooltip elements and don't already define an opacity transition. */
+.mrky-ocr-overlay,
+.mrky-img-ocr-loading {
+  transition: opacity 0.15s ease;
+}
+.mrky-ocr-overlay.mrky-capture-hide,
+.mrky-img-ocr-loading.mrky-capture-hide {
+  opacity: 0 !important;
+  transition: none !important;
+  pointer-events: none !important;
+}
+
 .mrky-tooltip-inner {
   background: #fff;
   border-radius: var(--mrky-radius);
@@ -371,6 +397,7 @@
 
 .mrky-btn-saved {
   background: var(--mrky-adj-green) !important;
+  cursor: default !important;
 }
 
 .mrky-btn-known {

@@ -23,6 +23,11 @@ const commonOptions = {
   minify: !isWatch,
   sourcemap: isWatch,
   target: ['chrome110'],
+  // In production builds, mark console.log as side-effect-free so the
+  // minifier drops calls whose return value is unused (all of them).
+  // console.error and console.warn are intentionally kept for real
+  // failure diagnostics in production.
+  pure: isWatch ? [] : ['console.log'],
   define: {
     'process.env.NODE_ENV': isWatch ? '"development"' : '"production"',
   },

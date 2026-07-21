@@ -17,39 +17,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   const btnOpenPdf = document.getElementById('btn-open-pdf');
   const wordsListEl = document.getElementById('words-list');
 
-  // Load Database Stats
-  try {
-    const allCards = await getAllCards();
-    const dueCards = await getDueCards();
-    const knownCount = await getKnownWordCount();
+  // Load Database Stats — fetched in parallel via Promise.all, and NOT
+  // awaited here (fire-and-forget IIFE) so the rest of this handler (Pro
+  // status check further below) runs immediately instead of waiting
+  // 100-500ms on IndexedDB. This, plus the neutral loading placeholders
+  // now in index.html, removes the FOUC flash of wrong default values.
+  (async () => {
+    try {
+      const [allCards, dueCards, knownCount] = await Promise.all([
+        getAllCards(),
+        getDueCards(),
+        getKnownWordCount(),
+      ]);
 
-    // Set stats text
-    statCardsEl.textContent = allCards.length;
-    statKnownEl.textContent = knownCount;
-    dueCountEl.textContent = dueCards.length;
+      // Set stats text
+      statCardsEl.textContent = allCards.length;
+      statKnownEl.textContent = knownCount;
+      dueCountEl.textContent = dueCards.length;
+      statCardsEl.classList.remove('mrky-skeleton');
+      statKnownEl.classList.remove('mrky-skeleton');
+      dueCountEl.classList.remove('mrky-skeleton');
 
-    // Enable/Disable review button
-    if (dueCards.length > 0) {
-      btnStartReview.disabled = false;
-      btnStartReview.textContent = 'ابدأ المراجعة';
-    } else {
-      btnStartReview.disabled = true;
-      btnStartReview.textContent = 'مكتمل اليوم!';
+      // Enable/Disable review button
+      if (dueCards.length > 0) {
+        btnStartReview.disabled = false;
+        btnStartReview.textContent = 'ابدأ المراجعة';
+      } else {
+        btnStartReview.disabled = true;
+        btnStartReview.textContent = 'مكتمل اليوم!';
+      }
+
+      // Enable/Disable review all button based on word existence
+      if (allCards.length > 0) {
+        btnReviewAll.disabled = false;
+      } else {
+        btnReviewAll.disabled = true;
+      }
+
+      // Render Recent Words
+      renderRecentWords(allCards.slice(-5).reverse());
+
+    } catch (error) {
+      console.error('[Mrky Popup] Database error:', error);
     }
-
-    // Enable/Disable review all button based on word existence
-    if (allCards.length > 0) {
-      btnReviewAll.disabled = false;
-    } else {
-      btnReviewAll.disabled = true;
-    }
-
-    // Render Recent Words
-    renderRecentWords(allCards.slice(-5).reverse());
-
-  } catch (error) {
-    console.error('[Mrky Popup] Database error:', error);
-  }
+  })();
 
   // Audio Playback Event Delegation
   wordsListEl.addEventListener('click', (e) => {
@@ -491,6 +502,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   function updateProUI(isPremium, emailOrKey = '', plan = 'free') {
     const isEmailLogged = emailOrKey && String(emailOrKey).includes('@');
     const dividerEl = document.querySelector('.pro-license-divider');
+    if (proStatusTag) proStatusTag.classList.remove('mrky-skeleton');
 
     if (proAccordionBar) {
       if (isPremium) {
@@ -772,7 +784,17 @@ document.addEventListener('DOMContentLoaded', async () => {
  */
 function renderRecentWords(cards) {
   const container = document.getElementById('words-list');
-  if (cards.length === 0) return; // Keep empty state
+  if (cards.length === 0) {
+    // Real DB read confirmed there are no cards — swap the loading
+    // skeleton for the genuine empty-state message.
+    container.innerHTML = `
+      <div class="empty-state">
+        <span class="empty-icon">📝</span>
+        <p>لم تحفظ أي كلمات بعد. ابدأ بمشاهدة يوتيوب واحفظ كلماتك الأولى!</p>
+      </div>
+    `;
+    return;
+  }
 
   container.innerHTML = '';
 

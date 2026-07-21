@@ -1,0 +1,17 @@
+# Normalize all text files to LF in the repository
+* text=auto eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.md text eol=lf
+*.mjs text eol=lf
+
+# Binary files — leave as-is
+*.png binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.wasm binary
+*.pdf binary
