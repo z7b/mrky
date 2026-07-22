@@ -264,7 +264,13 @@ export async function checkUserProfileByEmail(email) {
 }
 
 /**
- * Verify a user's license key against the 'licenses' table in Supabase.
+ * Verify and REDEEM a license key via the secure Edge Function.
+ *
+ * Security: The Edge Function now requires a Firebase token (same as
+ * increment-usage) and performs atomic server-side redemption — the key is
+ * bound to this email and the profiles table is updated to is_pro=true in
+ * a single Postgres transaction. No more "flash of Pro then revert to free".
+ *
  * @param {string} licenseKey - The license key entered by the user
  * @returns {Promise<{ valid: boolean, plan?: string, expiresAt?: string, error?: string }>}
  */
@@ -279,6 +285,12 @@ export async function verifyLicenseKey(licenseKey) {
     return { valid: false, error: 'أنت غير متصل بالإنترنت. يرجى التحقق من الشبكة.' };
   }
 
+  // ── Require authentication (same guard pattern as openCheckoutSecurely) ──
+  const idToken = await getValidFirebaseToken();
+  if (!idToken) {
+    return { valid: false, error: '🔐 يرجى تسجيل الدخول أولاً لتفعيل الترخيص' };
+  }
+
   try {
     const response = await fetch(
       `${SUPABASE_URL}/functions/v1/verify-license`,
@@ -288,6 +300,7 @@ export async function verifyLicenseKey(licenseKey) {
           'apikey': SUPABASE_ANON_KEY,
           'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
+          'X-Firebase-Token': idToken,
         },
         body: JSON.stringify({ licenseKey: cleanKey }),
       }
@@ -297,6 +310,12 @@ export async function verifyLicenseKey(licenseKey) {
 
     if (!response.ok || !result) {
       console.log('[Mrky Supabase] Error HTTP status:', response.status);
+      if (response.status === 401) {
+        return { valid: false, error: '🔐 جلسة تسجيل الدخول انتهت، أعد تسجيل الدخول' };
+      }
+      if (response.status === 429) {
+        return { valid: false, error: '⏳ محاولات كثيرة، حاول بعد قليل' };
+      }
       return { valid: false, error: 'تعذر الاتصال بقاعدة بيانات التحقق' };
     }
 
@@ -304,12 +323,23 @@ export async function verifyLicenseKey(licenseKey) {
       return { valid: false, error: result.error || 'مفتاح الترخيص غير صحيح أو غير موجود' };
     }
 
-    // Save premium status locally
+    // ── Optimistic local set for instant UI feedback ──
     await chrome.storage.local.set({
       isPremium: true,
       licenseKey: cleanKey,
       plan: result.plan || 'pro'
     });
+
+    // ── Immediately sync server-confirmed truth ──
+    // The server already wrote is_pro=true to profiles via the atomic RPC,
+    // but we fetch now so the local cache reflects the real DB state and
+    // the next periodic background sync won't "flip-flop" back to free.
+    try {
+      await fetchDailyUsageFromServer();
+    } catch {
+      // Non-fatal: the optimistic set above covers the UI; worst case the
+      // next periodic sync will pick it up in ~25s.
+    }
 
     return {
       valid: true,

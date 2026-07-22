@@ -36,26 +36,7 @@ export async function checkFirebaseProStatus(email) {
       return { isPro: true, plan: sbStatus.plan || 'pro', email: cleanEmail };
     }
 
-    // 2. Fallback check to Firestore profiles document
-    const docId = encodeURIComponent(cleanEmail);
-    const url = `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/profiles/${docId}?key=${firebaseConfig.apiKey}`;
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      const fields = data.fields || {};
-      const isPro = fields.is_pro?.booleanValue || false;
-      const plan = fields.plan?.stringValue || (isPro ? 'pro' : 'free');
-
-      if (isPro) {
-        await chrome.storage.local.set({
-          isPremium: true,
-          userEmail: cleanEmail,
-          plan
-        });
-        return { isPro: true, plan, email: cleanEmail };
-      }
-    }
-
+    // 2. 🔴 SECURITY FIX: Removed Firestore fallback via REST API to prevent public exposure
     return { isPro: false, plan: 'free', email: cleanEmail };
   } catch (err) {
     console.error('[PANDA Pro Check] Error verifying profile status:', err);

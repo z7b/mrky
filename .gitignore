@@ -3,3 +3,4 @@
 node_modules/
 scratch/
 .env
+supabase/.temp/
