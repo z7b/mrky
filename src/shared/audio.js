@@ -27,6 +27,18 @@ export async function playPronunciation(word, { onStart, onEnd, onError } = {}) 
   if (!word) return;
   const cleanWord = word.trim();
 
+  // 0. Require login for audio playback
+  if (typeof chrome !== 'undefined' && chrome.storage?.local) {
+    const loggedInEmail = await new Promise((resolve) => {
+      chrome.storage.local.get(['userEmail'], (res) => resolve(res?.userEmail));
+    });
+    if (!loggedInEmail) {
+      console.warn('[PANDA Audio] Audio playback requires logging in.');
+      if (onError) onError('Requires login');
+      return;
+    }
+  }
+
   // Helper to detect context invalidation
   const isContextInvalidated = (errStr = '') =>
     errStr.includes('Extension context invalidated') || errStr.includes('context invalidated');

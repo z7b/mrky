@@ -517,6 +517,21 @@ async function handleAddCard(e) {
   isSaving = true;
   try {
     const btn = tooltipEl.querySelector('.mrky-btn-add');
+
+    const storedAuth = await chrome.storage.local.get(['userEmail']);
+    if (!storedAuth.userEmail) {
+      if (btn) {
+        const origHTML = btn.innerHTML;
+        btn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+        btn.classList.add('mrky-auth-nudge');
+        setTimeout(() => {
+          btn.innerHTML = origHTML;
+          btn.classList.remove('mrky-auth-nudge');
+        }, 2500);
+      }
+      return;
+    }
+
     btn.disabled = true;
 
     // ── Step 1: Instant quota check (chrome.storage.local only, ~1-5ms) ──
@@ -657,6 +672,21 @@ async function handleMarkKnown(e) {
 
   const fetchSessionId = currentWord.sessionId;
   const btn = tooltipEl.querySelector('.mrky-btn-known');
+
+  const stored = await chrome.storage.local.get(['userEmail']);
+  if (!stored.userEmail) {
+    if (btn) {
+      const origText = btn.textContent;
+      btn.textContent = '🔐 سجّل دخولك أولاً';
+      btn.classList.add('mrky-auth-nudge');
+      setTimeout(() => {
+        btn.textContent = origText;
+        btn.classList.remove('mrky-auth-nudge');
+      }, 2500);
+    }
+    return;
+  }
+
   btn.disabled = true;
 
   try {
@@ -697,10 +727,25 @@ function handleSpeak(e) {
   if (!currentWord) return;
 
   const btn = tooltipEl.querySelector('.mrky-btn-speak');
-  playPronunciation(currentWord.word, {
-    onStart: () => btn.classList.add('mrky-btn-speak-active'),
-    onEnd: () => btn.classList.remove('mrky-btn-speak-active'),
-    onError: () => btn.classList.remove('mrky-btn-speak-active'),
+  chrome.storage.local.get(['userEmail'], (res) => {
+    if (!res.userEmail) {
+      if (btn) {
+        const origHTML = btn.innerHTML;
+        btn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+        btn.classList.add('mrky-auth-nudge');
+        setTimeout(() => {
+          btn.innerHTML = origHTML;
+          btn.classList.remove('mrky-auth-nudge');
+        }, 2500);
+      }
+      return;
+    }
+
+    playPronunciation(currentWord.word, {
+      onStart: () => btn.classList.add('mrky-btn-speak-active'),
+      onEnd: () => btn.classList.remove('mrky-btn-speak-active'),
+      onError: () => btn.classList.remove('mrky-btn-speak-active'),
+    });
   });
 }
 
@@ -718,6 +763,21 @@ async function handleTranslateSentence(e) {
 
   const fetchSessionId = currentWord.sessionId;
   const btn = tooltipEl.querySelector('.mrky-btn-translate-sentence');
+
+  const storedAuth = await chrome.storage.local.get(['userEmail']);
+  if (!storedAuth.userEmail) {
+    if (btn) {
+      const origHTML = btn.innerHTML;
+      btn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+      btn.classList.add('mrky-auth-nudge');
+      setTimeout(() => {
+        btn.innerHTML = origHTML;
+        btn.classList.remove('mrky-auth-nudge');
+      }, 2500);
+    }
+    return;
+  }
+
   const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
   const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
   const enEl = sentenceBox.querySelector('.mrky-sentence-en');
@@ -785,6 +845,21 @@ async function handleExplainWord(e) {
   const wordSnapshot = { ...currentWord };
 
   const btn = tooltipEl.querySelector('.mrky-btn-explain');
+
+  const storedAuth = await chrome.storage.local.get(['userEmail']);
+  if (!storedAuth.userEmail) {
+    if (btn) {
+      const origHTML = btn.innerHTML;
+      btn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+      btn.classList.add('mrky-auth-nudge');
+      setTimeout(() => {
+        btn.innerHTML = origHTML;
+        btn.classList.remove('mrky-auth-nudge');
+      }, 2500);
+    }
+    return;
+  }
+
   const explainBox = tooltipEl.querySelector('.mrky-tooltip-explain-box');
   const sentenceBox = tooltipEl.querySelector('.mrky-tooltip-sentence-box');
 

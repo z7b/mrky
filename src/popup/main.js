@@ -6,6 +6,7 @@ import { getAllCards, getDueCards, getKnownWordCount } from '../shared/db.js';
 import { playPronunciation } from '../shared/audio.js';
 import { verifyLicenseKey, loginWithGoogle, openStripeCheckout, openMonthlyCheckout, openAnnualCheckout, checkUserProfileByEmail, fetchDailyUsageFromServer } from '../shared/supabase.js';
 import { checkFirebaseProStatus, loginWithGoogleFirebase, signInWithFirebaseEmailPassword, signUpWithFirebaseEmailPassword, sendPasswordResetEmail, resendVerificationEmail } from '../shared/firebase.js';
+import { validateEmail, validatePassword } from '../shared/validation.js';
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM Elements
   const statCardsEl = document.getElementById('stat-cards-count');
@@ -39,20 +40,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       dueCountEl.classList.remove('mrky-skeleton');
 
       // Enable/Disable review button
-      if (dueCards.length > 0) {
-        btnStartReview.disabled = false;
-        btnStartReview.textContent = 'ابدأ المراجعة';
-      } else {
-        btnStartReview.disabled = true;
-        btnStartReview.textContent = 'مكتمل اليوم!';
-      }
+      chrome.storage.local.get(['userEmail'], (userRes) => {
+        const isLoggedOut = !userRes.userEmail;
 
-      // Enable/Disable review all button based on word existence
-      if (allCards.length > 0) {
-        btnReviewAll.disabled = false;
-      } else {
-        btnReviewAll.disabled = true;
-      }
+        if (dueCards.length > 0) {
+          btnStartReview.disabled = false;
+          btnStartReview.textContent = 'ابدأ المراجعة';
+        } else if (isLoggedOut) {
+          btnStartReview.disabled = false;
+          btnStartReview.textContent = 'مكتمل اليوم!';
+        } else {
+          btnStartReview.disabled = true;
+          btnStartReview.textContent = 'مكتمل اليوم!';
+        }
+
+        // Enable/Disable review all button based on word existence
+        if (allCards.length > 0 || isLoggedOut) {
+          btnReviewAll.disabled = false;
+        } else {
+          btnReviewAll.disabled = true;
+        }
+      });
 
       // Render Recent Words
       renderRecentWords(allCards.slice(-5).reverse());
@@ -68,10 +76,22 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (btn) {
       const word = btn.dataset.word;
       if (word) {
-        btn.classList.add('playing');
-        playPronunciation(word, {
-          onEnd: () => btn.classList.remove('playing'),
-          onError: () => btn.classList.remove('playing'),
+        chrome.storage.local.get(['userEmail'], (res) => {
+          if (!res.userEmail) {
+            const orig = btn.textContent;
+            btn.textContent = '🔐 سجّل دخولك أولاً';
+            btn.classList.add('mrky-auth-nudge');
+            setTimeout(() => {
+              btn.textContent = orig;
+              btn.classList.remove('mrky-auth-nudge');
+            }, 2500);
+            return;
+          }
+          btn.classList.add('playing');
+          playPronunciation(word, {
+            onEnd: () => btn.classList.remove('playing'),
+            onError: () => btn.classList.remove('playing'),
+          });
         });
       }
     }
@@ -79,12 +99,44 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Start Review Session button (due cards only)
   btnStartReview.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('review/index.html') });
+    chrome.storage.local.get(['userEmail'], (res) => {
+      if (!res.userEmail) {
+        const orig = btnStartReview.textContent;
+        btnStartReview.textContent = '🔐 سجّل دخولك أولاً 🐼';
+        btnStartReview.classList.add('mrky-auth-nudge');
+        setTimeout(() => {
+          btnStartReview.textContent = orig;
+          btnStartReview.classList.remove('mrky-auth-nudge');
+        }, 2500);
+        if (proMessage) {
+          proMessage.textContent = '🔐 المراجعة واختبار البطاقات متاحة للمسجلين فقط. سجّل دخولك أولاً لفتح ميزات PANDA 🐼';
+          proMessage.className = 'pro-message error';
+        }
+        return;
+      }
+      chrome.tabs.create({ url: chrome.runtime.getURL('review/index.html') });
+    });
   });
 
   // Start Review Session button (all cards)
   btnReviewAll.addEventListener('click', () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL('review/index.html?mode=all') });
+    chrome.storage.local.get(['userEmail'], (res) => {
+      if (!res.userEmail) {
+        const orig = btnReviewAll.textContent;
+        btnReviewAll.textContent = '🔐 سجّل دخولك أولاً 🐼';
+        btnReviewAll.classList.add('mrky-auth-nudge');
+        setTimeout(() => {
+          btnReviewAll.textContent = orig;
+          btnReviewAll.classList.remove('mrky-auth-nudge');
+        }, 2500);
+        if (proMessage) {
+          proMessage.textContent = '🔐 المراجعة واختبار البطاقات متاحة للمسجلين فقط. سجّل دخولك أولاً لفتح ميزات PANDA 🐼';
+          proMessage.className = 'pro-message error';
+        }
+        return;
+      }
+      chrome.tabs.create({ url: chrome.runtime.getURL('review/index.html?mode=all') });
+    });
   });
 
   // Open Local Player button
@@ -111,6 +163,22 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   if (btnTriggerOcr) {
     btnTriggerOcr.addEventListener('click', async () => {
+      const stored = await chrome.storage.local.get(['userEmail']);
+      if (!stored.userEmail) {
+        const originalHTML = btnTriggerOcr.innerHTML;
+        btnTriggerOcr.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً 🐼</span>';
+        btnTriggerOcr.classList.add('mrky-auth-nudge');
+        setTimeout(() => {
+          btnTriggerOcr.innerHTML = originalHTML;
+          btnTriggerOcr.classList.remove('mrky-auth-nudge');
+        }, 2500);
+        if (proMessage) {
+          proMessage.textContent = '🔐 ميزة تحديد النصوص واستخراج الكلمات متاحة للمسجلين فقط. سجّل دخولك أولاً!';
+          proMessage.className = 'pro-message error';
+        }
+        return;
+      }
+
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab || !tab.id) return;
 
@@ -442,15 +510,27 @@ document.addEventListener('DOMContentLoaded', async () => {
   function renderPlanStatusDashboard(isPro, planName) {
     if (!planStatusText) return;
     if (isPro) {
-      const planLabel = planName === 'annual' ? 'السنوي' : 'الشهري';
-      planStatusText.innerHTML = `
-        <div class="plan-dashboard-box pro">
-          <div class="plan-dashboard-title">
-            <span>🎉 اشتراك PANDA Pro (${planLabel}) مفعّل</span>
+      const planLabel = planName === 'annual' ? 'السنوي' : planName === 'monthly' ? 'الشهري' : '';
+      // قراءة تاريخ الانتهاء من الكاش المحلي
+      chrome.storage.local.get(['expiresAt'], (stored) => {
+        let expiryLine = '';
+        if (stored.expiresAt) {
+          const d = new Date(stored.expiresAt);
+          const formatted = d.toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+          expiryLine = `<p class="plan-dashboard-expiry">📅 تاريخ التجديد: ${formatted}</p>`;
+        } else {
+          expiryLine = `<p class="plan-dashboard-expiry">📅 حالة الاشتراك: نشط ومفعّل ✨</p>`;
+        }
+        planStatusText.innerHTML = `
+          <div class="plan-dashboard-box pro">
+            <div class="plan-dashboard-title">
+              <span>🎉 اشتراك PANDA Pro${planLabel ? ` (${planLabel})` : ''} مفعّل</span>
+            </div>
+            <p class="plan-dashboard-sub">جميع ميزات الحفظ والتعليل النحوي والمزامنة السحابية مفتوحة لحسابك بلا حدود ✨</p>
+            ${expiryLine}
           </div>
-          <p class="plan-dashboard-sub">جميع ميزات الحفظ والتعليل النحوي والمزامنة السحابية مفتوحة لحسابك بلا حدود ✨</p>
-        </div>
-      `;
+        `;
+      });
       return;
     }
 
@@ -523,8 +603,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (proStatusTag) proStatusTag.textContent = 'Pro مفعّل ⭐';
         if (proStatusDesc) proStatusDesc.textContent = 'حساب متصل ومفعل باحترافية ✨';
         if (loggedUserPlanBadge) {
-          const planText = plan === 'annual' ? 'سنة' : 'شهر';
-          loggedUserPlanBadge.textContent = `باقة PANDA Pro (${planText}) ⭐`;
+          const planText = plan === 'annual' ? 'سنة' : plan === 'monthly' ? 'شهر' : '';
+          loggedUserPlanBadge.textContent = planText ? `باقة PANDA Pro (${planText}) ⭐` : 'باقة PANDA Pro ⭐';
           loggedUserPlanBadge.classList.add('pro-badge');
         }
         renderPlanStatusDashboard(true, plan);
@@ -565,7 +645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     chrome.runtime.sendMessage({ type: 'CLEAR_SUBSCRIPTION_ALARMS' }).catch(() => {});
 
     chrome.storage.local.remove([
-      'isPremium', 'userEmail', 'plan', 'licenseKey',
+      'isPremium', 'userEmail', 'plan', 'licenseKey', 'expiresAt',
       'firebaseToken', 'firebaseRefreshToken', 'firebaseTokenExpiry',
       'dailyWordCount', 'dailyExplainCount', 'dailyUsageDate', 'dailyUsageIsPro'
     ], () => {
@@ -577,7 +657,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  chrome.storage.local.get(['isPremium', 'userEmail', 'licenseKey', 'plan'], async (res) => {
+  chrome.storage.local.get(['isPremium', 'userEmail', 'licenseKey', 'plan', 'expiresAt'], async (res) => {
     if (fbLoginEmail && res.userEmail) {
       fbLoginEmail.value = res.userEmail;
     }
@@ -595,15 +675,13 @@ document.addEventListener('DOMContentLoaded', async () => {
           serverProfile = await checkUserProfileByEmail(res.userEmail);
         }
         
-        if (serverProfile) {
+        if (serverProfile && !serverProfile.fromCache) {
           const isPro = serverProfile.isPro;
           const plan = serverProfile.plan || 'free';
+          const expiresAt = serverProfile.expiresAt || null;
           
-          // If server status is different from local cache, update local cache and UI
-          if (isPro !== res.isPremium || plan !== res.plan) {
-            await chrome.storage.local.set({ isPremium: isPro, plan: plan });
-            updateProUI(Boolean(isPro), res.userEmail, plan);
-          }
+          await chrome.storage.local.set({ isPremium: isPro, plan: plan, expiresAt: expiresAt });
+          updateProUI(Boolean(isPro), res.userEmail, plan);
         }
       } catch (err) {
         console.error('Silent verification failed, keeping cached status:', err);
@@ -631,15 +709,50 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   });
 
-  btnFbLogin?.addEventListener('click', async () => {
-    const email = (fbLoginEmail?.value || '').trim();
-    const password = (fbLoginPassword?.value || '').trim();
-
-    if (!email) {
-      proMessage.textContent = 'الرجاء إدخال البريد الإلكتروني';
-      proMessage.className = 'pro-message error';
+  // ── Real-time Email Input Blur/Typing Validation ──
+  fbLoginEmail?.addEventListener('input', () => {
+    const raw = fbLoginEmail.value;
+    if (!raw) {
+      fbLoginEmail.classList.remove('is-invalid', 'is-valid');
       return;
     }
+    const val = validateEmail(raw);
+    if (!val.valid) {
+      fbLoginEmail.classList.add('is-invalid');
+      fbLoginEmail.classList.remove('is-valid');
+    } else {
+      fbLoginEmail.classList.remove('is-invalid');
+      fbLoginEmail.classList.add('is-valid');
+      if (val.warning && proMessage) {
+        proMessage.textContent = val.warning;
+        proMessage.className = 'pro-message warning';
+      }
+    }
+  });
+
+  btnFbLogin?.addEventListener('click', async () => {
+    const emailRaw = (fbLoginEmail?.value || '').trim();
+    const passwordRaw = (fbLoginPassword?.value || '').trim();
+
+    const emailVal = validateEmail(emailRaw);
+    if (!emailVal.valid) {
+      proMessage.textContent = emailVal.error;
+      proMessage.className = 'pro-message error';
+      fbLoginEmail?.classList.add('is-invalid');
+      fbLoginEmail?.focus();
+      return;
+    }
+
+    const passVal = validatePassword(passwordRaw, false);
+    if (!passVal.valid) {
+      proMessage.textContent = passVal.error;
+      proMessage.className = 'pro-message error';
+      fbLoginPassword?.focus();
+      return;
+    }
+
+    const email = emailVal.cleanEmail;
+    const password = passwordRaw;
 
     btnFbLogin.disabled = true;
     btnFbLogin.textContent = 'جاري التحقق...';
@@ -653,7 +766,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       // ── Email not verified — show resend option ──
       proMessage.innerHTML = `⚠️ بريدك <strong>${res.email}</strong> غير موثق. تفقد بريدك واضغط رابط التحقق ثم سجل دخول مرة أخرى.<br><button id="btn-resend-verify" style="margin-top:8px;padding:6px 16px;border:none;border-radius:6px;background:#6C5CE7;color:#fff;cursor:pointer;font-size:13px;">📧 إعادة إرسال رسالة التحقق</button>`;
       proMessage.className = 'pro-message error';
-      // Attach resend handler
       document.getElementById('btn-resend-verify')?.addEventListener('click', async (e) => {
         e.target.disabled = true;
         e.target.textContent = 'جاري الإرسال...';
@@ -681,19 +793,41 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnFbSignup?.addEventListener('click', async () => {
-    const email = (fbLoginEmail?.value || '').trim();
-    const password = (fbLoginPassword?.value || '').trim();
+    const emailRaw = (fbLoginEmail?.value || '').trim();
+    const passwordRaw = (fbLoginPassword?.value || '').trim();
 
-    if (!email) {
-      proMessage.textContent = 'الرجاء إدخال البريد الإلكتروني لإنشاء حساب';
+    const emailVal = validateEmail(emailRaw);
+    if (!emailVal.valid) {
+      proMessage.textContent = emailVal.error;
       proMessage.className = 'pro-message error';
+      fbLoginEmail?.classList.add('is-invalid');
+      fbLoginEmail?.focus();
       return;
     }
-    if (!password || password.length < 6) {
-      proMessage.textContent = 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
-      proMessage.className = 'pro-message error';
+
+    // Auto-correct typo if user is signing up with e.g. gemil.com
+    if (emailVal.suggestion) {
+      proMessage.innerHTML = `💡 هل تقصد البريد: <strong>${emailVal.suggestion}</strong>؟<br><button id="btn-apply-suggestion" style="margin-top:8px;padding:6px 14px;border:none;border-radius:6px;background:#10B981;color:#fff;cursor:pointer;font-size:12px;font-weight:700;">✅ نعم، استبدل بـ ${emailVal.suggestion}</button>`;
+      proMessage.className = 'pro-message warning';
+      document.getElementById('btn-apply-suggestion')?.addEventListener('click', () => {
+        fbLoginEmail.value = emailVal.suggestion;
+        fbLoginEmail.dispatchEvent(new Event('input'));
+        proMessage.textContent = `تم التحديث لـ ${emailVal.suggestion}! اضغط "حساب جديد ➕" الآن.`;
+        proMessage.className = 'pro-message success';
+      });
       return;
     }
+
+    const passVal = validatePassword(passwordRaw, true);
+    if (!passVal.valid) {
+      proMessage.textContent = passVal.error;
+      proMessage.className = 'pro-message error';
+      fbLoginPassword?.focus();
+      return;
+    }
+
+    const email = emailVal.cleanEmail;
+    const password = passwordRaw;
 
     btnFbSignup.disabled = true;
     btnFbSignup.textContent = 'جاري الإنشاء...';
@@ -717,12 +851,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   btnForgotPassword?.addEventListener('click', async () => {
-    const email = (fbLoginEmail?.value || '').trim();
-    if (!email) {
-      proMessage.textContent = 'اكتب بريدك الإلكتروني أولاً ثم اضغط "نسيت كلمة المرور"';
+    const emailRaw = (fbLoginEmail?.value || '').trim();
+    const emailVal = validateEmail(emailRaw);
+    if (!emailVal.valid) {
+      proMessage.textContent = emailVal.error;
       proMessage.className = 'pro-message error';
+      fbLoginEmail?.classList.add('is-invalid');
+      fbLoginEmail?.focus();
       return;
     }
+
+    const email = emailVal.cleanEmail;
+
     btnForgotPassword.disabled = true;
     btnForgotPassword.textContent = 'جاري الإرسال...';
     const res = await sendPasswordResetEmail(email);
@@ -737,22 +877,58 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   });
 
-  document.getElementById('btn-monthly-upgrade')?.addEventListener('click', () => {
-    chrome.storage.local.get(['userEmail'], (res) => {
-      openMonthlyCheckout(res.userEmail || fbLoginEmail?.value || '');
-    });
+  document.getElementById('btn-monthly-upgrade')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-monthly-upgrade');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ جاري تحضير الرابط...';
+    proMessage.className = 'pro-message hidden';
+
+    const stored = await new Promise(r => chrome.storage.local.get(['userEmail'], r));
+    const result = await openMonthlyCheckout(stored.userEmail || fbLoginEmail?.value || '');
+
+    if (result && !result.success) {
+      proMessage.textContent = result.error;
+      proMessage.className = 'pro-message error';
+    }
+    btn.disabled = false;
+    btn.textContent = originalText;
   });
 
-  document.getElementById('btn-annual-upgrade')?.addEventListener('click', () => {
-    chrome.storage.local.get(['userEmail'], (res) => {
-      openAnnualCheckout(res.userEmail || fbLoginEmail?.value || '');
-    });
+  document.getElementById('btn-annual-upgrade')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-annual-upgrade');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ جاري تحضير الرابط...';
+    proMessage.className = 'pro-message hidden';
+
+    const stored = await new Promise(r => chrome.storage.local.get(['userEmail'], r));
+    const result = await openAnnualCheckout(stored.userEmail || fbLoginEmail?.value || '');
+
+    if (result && !result.success) {
+      proMessage.textContent = result.error;
+      proMessage.className = 'pro-message error';
+    }
+    btn.disabled = false;
+    btn.textContent = originalText;
   });
 
-  document.getElementById('btn-stripe-upgrade')?.addEventListener('click', () => {
-    chrome.storage.local.get(['userEmail'], (res) => {
-      openAnnualCheckout(res.userEmail || fbLoginEmail?.value || '');
-    });
+  document.getElementById('btn-stripe-upgrade')?.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-stripe-upgrade');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ جاري تحضير الرابط...';
+    proMessage.className = 'pro-message hidden';
+
+    const stored = await new Promise(r => chrome.storage.local.get(['userEmail'], r));
+    const result = await openAnnualCheckout(stored.userEmail || fbLoginEmail?.value || '');
+
+    if (result && !result.success) {
+      proMessage.textContent = result.error;
+      proMessage.className = 'pro-message error';
+    }
+    btn.disabled = false;
+    btn.textContent = originalText;
   });
 
   btnActivate?.addEventListener('click', async () => {

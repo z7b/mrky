@@ -36,6 +36,22 @@ const $ = (id) => document.getElementById(id);
 
 /* ─── Init ─── */
 document.addEventListener('DOMContentLoaded', async () => {
+  // Check if user is logged in
+  const stored = await chrome.storage.local.get(['userEmail']);
+  if (!stored.userEmail) {
+    const cardContainer = $('review-card') || document.querySelector('.mrky-card');
+    if (cardContainer) {
+      cardContainer.innerHTML = `
+        <div style="text-align:center;padding:40px 20px;">
+          <div style="font-size:48px;margin-bottom:12px;">🔒</div>
+          <h2 style="font-size:20px;font-weight:700;color:#2D3748;margin-bottom:8px;">المراجعة متاحة للمسجلين فقط</h2>
+          <p style="color:#718096;font-size:14px;line-height:1.6;margin-bottom:20px;">يرجى فتح الإضافة وتسجيل الدخول بحسابك أولاً للبدء بمراجعة البطاقات.</p>
+        </div>
+      `;
+    }
+    return;
+  }
+
   // Check if we're in "all cards" mode via query param
   const params = new URLSearchParams(window.location.search);
   isAllMode = params.get('mode') === 'all';

@@ -26,7 +26,7 @@
     "https://*.wikimedia.org/*"
   ],
   "content_security_policy": {
-    "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://xkkgvupfjlzrtzcfaqpu.supabase.co https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://api.mymemory.translated.net https://translate.googleapis.com https://api.dictionaryapi.dev https://*.wiktionary.org https://*.wikimedia.org https://ssl.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline';"
+    "extension_pages": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://xkkgvupfjlzrtzcfaqpu.supabase.co https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://firestore.googleapis.com https://api.mymemory.translated.net https://translate.googleapis.com https://translate.google.com https://api.dictionaryapi.dev https://*.wiktionary.org https://*.wikimedia.org https://ssl.gstatic.com data:; img-src 'self' data: blob:; media-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline';"
   },
   "background": {
     "service_worker": "service-worker.js"

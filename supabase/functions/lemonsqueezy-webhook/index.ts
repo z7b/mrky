@@ -128,7 +128,9 @@ serve(async (req) => {
 
     // ── Step 9: Process activation events ──
     if (activationEvents.includes(eventName)) {
-      console.log(`[PANDA Webhook] Activating Pro: ${customerEmail} (${eventName}, ${planName})`);
+      // التقاط تاريخ التجديد أو الانتهاء من Lemon Squeezy
+      const expiresAt = attrs.renews_at || attrs.ends_at || null;
+      console.log(`[PANDA Webhook] Activating Pro: ${customerEmail} (${eventName}, ${planName}, expires: ${expiresAt})`);
 
       const { error } = await supabase
         .from('profiles')
@@ -137,6 +139,7 @@ serve(async (req) => {
             email: customerEmail,
             is_pro: true,
             plan: planName, // المعرف بصورة موحدة من خريطة المتغيرات
+            expires_at: expiresAt, // تاريخ التجديد / الانتهاء
             updated_at: new Date().toISOString(),
           },
           { onConflict: 'email' }

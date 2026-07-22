@@ -315,10 +315,24 @@ async function showOCRResultPanel(text, analyzed) {
   const speakBtn = panel.querySelector('.mrky-ocr-speak');
   if (speakBtn) {
     speakBtn.addEventListener('click', () => {
-      playPronunciation(text, {
-        onStart: () => speakBtn.classList.add('mrky-btn-speak-active'),
-        onEnd: () => speakBtn.classList.remove('mrky-btn-speak-active'),
-        onError: () => speakBtn.classList.remove('mrky-btn-speak-active'),
+      chrome.storage.local.get(['userEmail'], (res) => {
+        if (!res.userEmail) {
+          const origHTML = speakBtn.innerHTML;
+          speakBtn.innerHTML = '<span>🔐</span> <span>سجّل دخولك أولاً</span>';
+          speakBtn.classList.add('mrky-auth-nudge');
+          setTimeout(() => {
+            if (speakBtn.isConnected) {
+              speakBtn.innerHTML = origHTML;
+              speakBtn.classList.remove('mrky-auth-nudge');
+            }
+          }, 2500);
+          return;
+        }
+        playPronunciation(text, {
+          onStart: () => speakBtn.classList.add('mrky-btn-speak-active'),
+          onEnd: () => speakBtn.classList.remove('mrky-btn-speak-active'),
+          onError: () => speakBtn.classList.remove('mrky-btn-speak-active'),
+        });
       });
     });
   }

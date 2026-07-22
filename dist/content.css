@@ -337,6 +337,22 @@
   animation: mrky-pulse-speak 0.6s ease-in-out infinite alternate;
 }
 
+.mrky-btn-speak.mrky-auth-nudge {
+  width: auto !important;
+  min-width: 125px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 20px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  z-index: 10 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
 @keyframes mrky-pulse-speak {
   from {
     transform: scale(1);
@@ -1028,4 +1044,22 @@ body.mrky-disabled-mode .mrky-tooltip {
   0% { left: -100%; }
   50% { left: 100%; }
   100% { left: 100%; }
+}
+
+/* ─── Interactive PANDA Auth Nudge State ─── */
+.mrky-auth-nudge {
+  background: linear-gradient(135deg, #7C3AED 0%, #9333EA 50%, #C084FC 100%) !important;
+  color: #FFFFFF !important;
+  border: 1px solid rgba(192, 132, 252, 0.5) !important;
+  box-shadow: 0 0 16px rgba(147, 51, 234, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+  animation: panda-lock-shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both !important;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  font-weight: 700 !important;
+}
+
+@keyframes panda-lock-shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0) scale(0.98); }
+  20%, 80% { transform: translate3d(2px, 0, 0) scale(1.02); }
+  30%, 50%, 70% { transform: translate3d(-3px, 0, 0) scale(1.01); }
+  40%, 60% { transform: translate3d(3px, 0, 0) scale(1.02); }
 }

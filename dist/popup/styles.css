@@ -539,6 +539,19 @@ body {
   animation: pulse 1s infinite;
 }
 
+.mrky-btn-speak-popup.mrky-auth-nudge {
+  width: auto !important;
+  min-width: 125px !important;
+  height: 26px !important;
+  padding: 0 10px !important;
+  border-radius: 20px !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  white-space: nowrap !important;
+  z-index: 10 !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
 .word-eng {
   font-size: 14px;
   font-weight: 700;
@@ -1142,6 +1155,23 @@ body {
   box-shadow: 0 0 0 3px rgba(239, 44, 69, 0.22);
 }
 
+.pro-input-field.is-invalid {
+  border-color: #EF4444 !important;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.25) !important;
+  background: rgba(239, 68, 68, 0.08) !important;
+}
+
+.pro-input-field.is-valid {
+  border-color: #10B981 !important;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.25) !important;
+}
+
+.pro-message.warning {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #FCD34D;
+}
+
 .pro-auth-buttons {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1472,6 +1502,15 @@ body {
   font-weight: 600;
 }
 
+.plan-dashboard-expiry {
+  font-size: 10px;
+  color: #94A3B8;
+  font-weight: 500;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(148, 163, 184, 0.15);
+}
+
 .usage-meter-row {
   display: flex;
   flex-direction: column;
@@ -1534,4 +1573,23 @@ body {
 
 .free-upgrade-icon {
   font-size: 13px;
+}
+
+/* ─── Interactive PANDA Auth Nudge State ─── */
+.mrky-auth-nudge {
+  background: linear-gradient(135deg, #7C3AED 0%, #9333EA 50%, #C084FC 100%) !important;
+  color: #FFFFFF !important;
+  border: 1px solid rgba(192, 132, 252, 0.5) !important;
+  box-shadow: 0 0 16px rgba(147, 51, 234, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2) !important;
+  animation: panda-lock-shake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3) !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.2px;
+}
+
+@keyframes panda-lock-shake {
+  10%, 90% { transform: translate3d(-1px, 0, 0) scale(0.98); }
+  20%, 80% { transform: translate3d(2px, 0, 0) scale(1.02); }
+  30%, 50%, 70% { transform: translate3d(-3px, 0, 0) scale(1.01); }
+  40%, 60% { transform: translate3d(3px, 0, 0) scale(1.02); }
 }

@@ -253,7 +253,9 @@ export async function signUpWithFirebaseEmailPassword(email, password) {
       firebaseTokenExpiry: Date.now() + (parseInt(data.expiresIn, 10) * 1000),
       isPremium: false,
       plan: 'free',
-      emailVerified: false
+      emailVerified: false,
+      pendingVerificationEmail: cleanEmail,
+      pendingVerificationToken: data.idToken
     });
 
     return {
@@ -331,7 +333,8 @@ export async function sendPasswordResetEmail(email) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           requestType: 'PASSWORD_RESET',
-          email: cleanEmail
+          email: cleanEmail,
+          continueUrl: `https://${firebaseConfig.authDomain}`
         })
       }
     );
@@ -339,10 +342,10 @@ export async function sendPasswordResetEmail(email) {
     const data = await res.json();
     if (!res.ok || data.error) {
       const msg = data.error?.message || '';
-      if (msg.includes('EMAIL_NOT_FOUND')) {
-        return { success: false, error: 'البريد الإلكتروني غير مسجل' };
+      if (msg.includes('EMAIL_NOT_FOUND') || msg.includes('USER_NOT_FOUND')) {
+        return { success: false, error: '⚠️ هذا البريد غير مسجل بالسيرفر. يرجى إدخال كلمة مرور والضغط على "حساب جديد ➕" لإنشاء حساب أولاً!' };
       }
-      return { success: false, error: 'تعذر إرسال رابط الاستعادة' };
+      return { success: false, error: 'تعذر إرسال رابط الاستعادة: ' + (msg || 'خطأ غير معروف') };
     }
 
     return { success: true };

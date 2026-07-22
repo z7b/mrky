@@ -246,15 +246,17 @@ export async function checkUserProfileByEmail(email) {
 
     const data = await response.json();
     const isPro = Boolean(data.is_pro);
-    const plan = isPro ? 'pro' : 'free';
+    const plan = isPro ? (data.plan || 'pro') : 'free';
+    const expiresAt = data.expires_at || null;
 
     await chrome.storage.local.set({
       isPremium: isPro,
       userEmail: email,
       plan,
+      expiresAt,
     });
 
-    return { isPro, plan, email };
+    return { isPro, plan, email, expiresAt };
   } catch (err) {
     console.log('[PANDA Security] Profile check via Edge Function failed:', err.message, '— falling back to cache');
     return await getCachedStatus();
@@ -388,26 +390,20 @@ export function loginWithGoogle() {
 
 /**
  * Open secure Lemon Squeezy checkout with a SERVER-VERIFIED email when the
- * user is logged in (via Firebase), falling back to the old client-side
- * URL construction if they aren't (so checkout still works either way).
+ * user is logged in (via Firebase).
  *
- * Opens the window synchronously first, then redirects it once the
- * server-built URL is ready — awaiting the fetch before calling
- * window.open() would get the popup blocked, since the browser only
- * associates a "user gesture" with a window.open() call made synchronously
- * inside the click handler.
+ * ARCHITECTURE FIX: Uses chrome.tabs.create instead of window.open to avoid
+ * stealing focus from the extension popup (which causes Chrome to destroy
+ * the popup and kill in-flight JS). Returns an error object instead of
+ * calling alert(), so the popup UI can display the message inline.
+ *
+ * @returns {Promise<{success: boolean, error?: string}>}
  */
 async function openCheckoutSecurely(plan, fallbackEmail) {
-  const popup = window.open('', '_blank');
-
   try {
     const idToken = await getValidFirebaseToken();
     if (!idToken) {
-      // 🔒 SECURITY FIX: Unauthenticated users MUST log in first to bind their subscription securely.
-      // Eliminates the fallback path that allowed building checkout URLs from unverified client inputs.
-      if (popup) popup.close();
-      alert('🔐 يرجى تسجيل الدخول أو إنشاء حساب أولاً لإكمال عملية الشراء وتفعيل اشتراكك تلقائياً.');
-      return;
+      return { success: false, error: '🔐 يرجى تسجيل الدخول أو إنشاء حساب أولاً لإكمال عملية الشراء وتفعيل اشتراكك تلقائياً.' };
     }
 
     const response = await fetch(
@@ -426,18 +422,15 @@ async function openCheckoutSecurely(plan, fallbackEmail) {
 
     const result = await response.json().catch(() => null);
     if (response.ok && result?.url) {
-      if (popup) popup.location.href = result.url;
-      else window.open(result.url, '_blank');
-      return;
+      chrome.tabs.create({ url: result.url });
+      return { success: true };
     }
 
     console.log('[Mrky Supabase] create-checkout failed:', result?.error);
-    if (popup) popup.close();
-    alert('⚠ تعذر إنشاء رابط الشراء، يرجى المحاولة لاحقاً.');
+    return { success: false, error: '⚠ تعذر إنشاء رابط الشراء، يرجى المحاولة لاحقاً.' };
   } catch (err) {
     console.log('[Mrky Supabase] create-checkout error:', err);
-    if (popup) popup.close();
-    alert('⚠ خطأ في الاتصال بالشبكة.');
+    return { success: false, error: '⚠ خطأ في الاتصال بالشبكة.' };
   }
 }
 
@@ -445,14 +438,14 @@ async function openCheckoutSecurely(plan, fallbackEmail) {
  * Open secure Lemon Squeezy Annual Checkout (pre-fills email if provided)
  */
 export async function openAnnualCheckout(email = '') {
-  await openCheckoutSecurely('annual', email);
+  return await openCheckoutSecurely('annual', email);
 }
 
 /**
  * Open secure Lemon Squeezy Monthly Checkout (pre-fills email if provided)
  */
 export async function openMonthlyCheckout(email = '') {
-  await openCheckoutSecurely('monthly', email);
+  return await openCheckoutSecurely('monthly', email);
 }
 
 /**
