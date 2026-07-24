@@ -21,7 +21,8 @@ async function getOCRWorker() {
   tesseractWorker = await Tesseract.createWorker('eng', 1, {
     workerPath: `${basePath}/worker.min.js`,
     corePath: `${basePath}/tesseract-core.wasm.js`,
-    langPath: basePath, // Will look for eng.traineddata.gz here
+    langPath: basePath, // Will look for eng.traineddata here
+    gzip: false, // Edge Web Store rejects .gz files
     workerBlobURL: false, // CRITICAL FOR MV3 CSP
     logger: m => console.log('[Mrky OCR Offscreen]', m),
   });
